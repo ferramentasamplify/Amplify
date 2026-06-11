@@ -1,9 +1,23 @@
-@echo off
-cd /d "%~dp0"
-echo Publicando alteracoes no GitHub...
-git add .
-git commit -m "Atualizacao %date% %time%"
-git push
-echo.
-echo Pronto! Vercel vai fazer o deploy em ~1 minuto.
-pause
+{
+  "name": "amplify-hub",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "@notionhq/client": "^5.15.0",
+    "next": "16.2.1",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "recharts": "^3.8.1",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.1",
+    "tailwin
