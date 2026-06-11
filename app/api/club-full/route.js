@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server'
-import pkg from '@notionhq/client'
-const { Client } = pkg
+import { Client } from '@notionhq/client'
 import * as XLSX from 'xlsx'
 
 export const dynamic = 'force-dynamic'
@@ -35,7 +34,7 @@ async function fetchCreators() {
   const results = []
   let cursor
   do {
-    const res = await notion.databases.query({ database_id: CREATORS_DB, start_cursor: cursor, page_size: 100 })
+    const res = await getNotion().databases.query({ database_id: CREATORS_DB, start_cursor: cursor, page_size: 100 })
     results.push(...res.results)
     cursor = res.has_more ? (res.next_cursor ?? undefined) : undefined
   } while (cursor)

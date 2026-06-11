@@ -1,11 +1,10 @@
 import { NextResponse } from 'next/server'
-import pkg from '@notionhq/client'
-const { Client } = pkg
+import { Client } from '@notionhq/client'
 import * as XLSX from 'xlsx'
 
 export const dynamic = 'force-dynamic'
 
-const notion     = new Client({ auth: process.env.NOTION_TOKEN })
+function getNotion() { return new Client({ auth: process.env.NOTION_TOKEN }) }
 const INDIQUE_DB = '31ab0bbef15380a1ab97caa5c68e9813'
 const FOLDER_ID  = process.env.GDRIVE_FOLDER_ID || '1VeOK2-DTfnDbbRueHpKK-a5QkQtyP_Nj'
 const GDRIVE_KEY = process.env.GDRIVE_API_KEY || ''
@@ -27,7 +26,7 @@ async function fetchAllLeads() {
   const results = []
   let cursor
   do {
-    const res = await notion.databases.query({ database_id: INDIQUE_DB, start_cursor: cursor, page_size: 100 })
+    const res = await getNotion().databases.query({ database_id: INDIQUE_DB, start_cursor: cursor, page_size: 100 })
     results.push(...res.results)
     cursor = res.has_more ? (res.next_cursor ?? undefined) : undefined
   } while (cursor)
