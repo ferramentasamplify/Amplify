@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
-import { Client } from '@notionhq/client'
+import pkg from '@notionhq/client'
+const { Client } = pkg
 import * as XLSX from 'xlsx'
 
 export const dynamic = 'force-dynamic'
