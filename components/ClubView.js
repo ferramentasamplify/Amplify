@@ -23,6 +23,8 @@ const CAT_CONFIG = {
   Origens: { color: "#059669", badge: "🌱" },
 };
 
+const LIGA_77_URL = "https://liga77-retencao.netlify.app";
+
 export default function ClubView() {
   const pathname = usePathname();
   const [data,    setData]    = useState(null);
@@ -108,6 +110,38 @@ export default function ClubView() {
               <button onClick={() => { setStartDate(""); setEndDate(""); setApplied({ start: "", end: "" }); }}
                 className="px-3 py-1.5 rounded-lg bg-white/5 text-white/50 text-xs font-bold">× Limpar</button>
             )}
+          </div>
+        </div>
+
+        <div className="bg-[#14161F] border border-white/10 rounded-2xl p-5">
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div>
+              <p className="text-xs font-mono uppercase tracking-widest text-white/40 mb-1">Acessos</p>
+              <h2 className="text-xl font-extrabold tracking-tight">Datas Duplas</h2>
+              <p className="text-sm text-white/40 mt-1 max-w-2xl">
+                Campanhas pontuais da retenção com metas por creator, acompanhamento diário e visão gerencial.
+              </p>
+            </div>
+            <Link
+              href="/club/datas-duplas"
+              className="px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 hover:border-[#a855f7]/60 text-sm font-bold text-white transition-colors"
+            >
+              Abrir Datas Duplas →
+            </Link>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-4">
+            <a
+              href={LIGA_77_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="group rounded-xl border border-white/10 bg-[#0A0B12] p-4 hover:border-[#25F4EE]/60 hover:bg-white/[0.04] transition-colors"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm font-extrabold text-white">Liga 7.7</span>
+                <span className="text-white/30 group-hover:text-[#25F4EE] transition-colors">↗</span>
+              </div>
+              <p className="text-xs text-white/40 mt-2">Dashboard por creator + gestão macro da campanha.</p>
+            </a>
           </div>
         </div>
 
