@@ -105,22 +105,27 @@ export default function HubView() {
   const [authed, setAuthed]     = useState(false);
   const [notionData, setNotion] = useState(null);
   const [saData,     setSa]     = useState(null);
+  const [igData,     setIg]     = useState(null);
   const [clubData,   setClub]   = useState(null);
   const [metaData,   setMeta]   = useState(null);
-  const [loading,    setLoading] = useState({ notion: true, sa: true, club: true, meta: true });
+  const [loading,    setLoading] = useState({ notion: true, sa: true, ig: true, club: true, meta: true });
   const [errors,     setErrors]  = useState({});
   const [lastUpdate, setLastUpdate] = useState(null);
-
-  const today = new Date().toISOString().slice(0, 10);
-  const minus30 = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+  const [dateRange] = useState(() => {
+    const now = new Date();
+    return {
+      today: now.toISOString().slice(0, 10),
+      minus30: new Date(now.getTime() - 30 * 86400000).toISOString().slice(0, 10),
+    };
+  });
 
   const fetchAll = useCallback(async () => {
     if (!authed) return;
-    setLoading({ notion: true, sa: true, club: true, meta: true });
+    setLoading({ notion: true, sa: true, ig: true, club: true, meta: true });
     setErrors({});
 
     // Aquisição (Notion)
-    fetch(`/api/notion?since=${minus30}&until=${today}&level=summary`)
+    fetch(`/api/notion?since=${dateRange.minus30}&until=${dateRange.today}&level=summary`)
       .then(r => r.json())
       .then(d => { setNotion(d); setLoading(p => ({ ...p, notion: false })); })
       .catch(e => { setErrors(p => ({ ...p, notion: e.message })); setLoading(p => ({ ...p, notion: false })); });
@@ -131,6 +136,12 @@ export default function HubView() {
       .then(d => { setSa(d); setLoading(p => ({ ...p, sa: false })); })
       .catch(e => { setErrors(p => ({ ...p, sa: e.message })); setLoading(p => ({ ...p, sa: false })); });
 
+    // Indique e Ganhe
+    fetch("/api/indiqueeganhe")
+      .then(r => r.json())
+      .then(d => { setIg(d); setLoading(p => ({ ...p, ig: false })); })
+      .catch(e => { setErrors(p => ({ ...p, ig: e.message })); setLoading(p => ({ ...p, ig: false })); });
+
     // Amplify Club
     fetch("/api/club")
       .then(r => r.json())
@@ -138,15 +149,18 @@ export default function HubView() {
       .catch(e => { setErrors(p => ({ ...p, club: e.message })); setLoading(p => ({ ...p, club: false })); });
 
     // Meta Ads
-    fetch(`/api/meta?since=${minus30}&until=${today}&level=campaign`)
+    fetch(`/api/meta?since=${dateRange.minus30}&until=${dateRange.today}&level=campaign`)
       .then(r => r.json())
       .then(d => { setMeta(d); setLoading(p => ({ ...p, meta: false })); })
       .catch(e => { setErrors(p => ({ ...p, meta: e.message })); setLoading(p => ({ ...p, meta: false })); });
 
     setLastUpdate(new Date());
-  }, [authed]);
+  }, [authed, dateRange]);
 
-  useEffect(() => { fetchAll(); }, [fetchAll]);
+  useEffect(() => {
+    const timer = setTimeout(fetchAll, 0);
+    return () => clearTimeout(timer);
+  }, [fetchAll]);
 
   if (!authed) return <LoginScreen onLogin={() => setAuthed(true)} />;
 
@@ -289,6 +303,21 @@ export default function HubView() {
               <MiniKpi label="Conversão" value={saData?.conversion != null ? `${saData.conversion}%` : "—"} color="#f97316" />
               <MiniKpi label="GMV (30d)" value={fmtBRL(saData?.totalGmv)} color="#10b981" />
             </SectionCard>
+
+            {/* Indique e Ganhe */}
+            <SectionCard
+              title="Indique e Ganhe"
+              icon="🎁"
+              href="/indiqueeganhe"
+              color="#EAB308"
+              loading={loading.ig}
+              error={errors.ig}
+            >
+              <MiniKpi label="Indicações" value={fmtNum(igData?.total)} color="#fff" />
+              <MiniKpi label="GMV (30d)" value={fmtBRL(igData?.totalGmv)} color="#10b981" />
+              <MiniKpi label="Comissão" value={fmtBRL(igData?.totalCom)} color="#EAB308" />
+              <MiniKpi label="Repasse" value={fmtBRL(igData?.indiqueEarn)} color="#f97316" />
+            </SectionCard>
           </div>
         </div>
 
@@ -346,6 +375,7 @@ export default function HubView() {
               { href: "/custos",             label: "Custos",       icon: "💰" },
               { href: "/meta",               label: "Meta Ads",     icon: "📣" },
               { href: "/superafiliado",      label: "Super Afiliado", icon: "🤝" },
+              { href: "/indiqueeganhe",      label: "Indique e Ganhe", icon: "🎁" },
               { href: "/club",               label: "Amplify Club", icon: "💎" },
             ].map((t) => (
               <Link
