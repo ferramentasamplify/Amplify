@@ -9,7 +9,9 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@netlify/blobs": "^10.7.9",
     "@notionhq/client": "^5.15.0",
+    "bcryptjs": "^3.0.3",
     "next": "16.2.1",
     "react": "19.2.4",
     "react-dom": "19.2.4",
