@@ -11,6 +11,21 @@ const fmtBRL = (n) =>
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   });
+const fmtPct = (n) => `${Number(n || 0).toFixed(1)}%`;
+const todayISO = () => new Date().toISOString().slice(0, 10);
+const fmtDate = (dateString) => {
+  if (!dateString) return "—";
+  const [year, month, day] = String(dateString).split("-");
+  if (!year || !month || !day) return dateString;
+  return `${day}/${month}/${year}`;
+};
+const contractLabel = (days) => {
+  if (days === null || days === undefined) return "sem data";
+  if (days < 0) return `venceu ha ${Math.abs(days)}d`;
+  if (days === 0) return "vence hoje";
+  if (days === 1) return "vence amanha";
+  return `vence em ${days}d`;
+};
 
 const CAT_CONFIG = {
   Diamond: { color: "#2563EB", badge: "💎" },
@@ -29,12 +44,19 @@ export default function AmCarteiraView({ slug }) {
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [categoria, setCategoria] = useState("todas");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState(todayISO());
+  const [applied, setApplied] = useState({ from: "", to: todayISO() });
 
   async function load() {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch(`/api/am/${slug}/carteira`, { cache: "no-store" });
+      const params = new URLSearchParams();
+      if (applied.from) params.set("from", applied.from);
+      if (applied.to) params.set("to", applied.to);
+      const query = params.toString();
+      const res = await fetch(`/api/am/${slug}/carteira${query ? `?${query}` : ""}`, { cache: "no-store" });
       const d = await res.json();
       if (!res.ok) {
         if (res.status === 401) {
@@ -44,6 +66,10 @@ export default function AmCarteiraView({ slug }) {
         throw new Error(d.error || "Erro ao carregar carteira.");
       }
       setData(d);
+      if (d.dataFreshness?.requestedPeriod) {
+        setStartDate((current) => current || d.dataFreshness.requestedPeriod.from || "");
+        setEndDate((current) => current || d.dataFreshness.requestedPeriod.to || todayISO());
+      }
     } catch (e) {
       setError(e.message);
     } finally {
@@ -54,7 +80,7 @@ export default function AmCarteiraView({ slug }) {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slug]);
+  }, [slug, applied]);
 
   async function logout() {
     await fetch("/api/am/logout", { method: "POST" });
@@ -73,6 +99,11 @@ export default function AmCarteiraView({ slug }) {
   const am = data?.am;
   const creators = data?.creators || [];
   const summary = data?.summary || {};
+  const contratosVencendo = summary.contratosVencendoLista || [];
+  const freshness = data?.dataFreshness || {};
+  const requestedPeriod = freshness.requestedPeriod || applied;
+  const effectiveCoverage = freshness.effectiveCoverage || {};
+  const availablePeriods = freshness.availablePeriods || [];
 
   const filtered = creators.filter((c) => {
     const matchSearch =
@@ -121,20 +152,61 @@ export default function AmCarteiraView({ slug }) {
               Olá, <span style={{ color: am?.accentColor }}>{am?.shortName}</span> 👋
             </h1>
             <p className="text-sm text-white/50 mt-1">
-              Sua carteira atualizada do Amplify Club — GMV, categoria e link direto pro Notion.
+              Sua carteira atualizada do Amplify Club — GMV, nicho, contratos e link direto pro Notion.
             </p>
           </div>
-          <button
-            onClick={load}
-            className="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-xs font-bold text-white/70 border border-white/10"
-          >
-            🔄 Atualizar
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[10px] font-mono uppercase tracking-widest text-white/40 w-full sm:w-auto">
+              Período
+            </span>
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="bg-[#14161F] border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:border-[#a855f7]"
+            />
+            <span className="text-white/30 text-xs">→</span>
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              className="bg-[#14161F] border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:border-[#a855f7]"
+            />
+            <button
+              onClick={() => setApplied({ from: startDate, to: endDate })}
+              className="px-3 py-1.5 rounded-lg text-xs font-bold text-white"
+              style={{ background: am?.accentColor || "#a855f7" }}
+            >
+              Aplicar período
+            </button>
+            <button
+              onClick={load}
+              className="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-xs font-bold text-white/70 border border-white/10"
+            >
+              🔄 Atualizar
+            </button>
+          </div>
         </div>
 
-        {data?.warning && (
-          <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-xl p-3 text-xs text-yellow-200">
-            ⚠️ {data.warning}
+        {availablePeriods.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {availablePeriods.slice(-7).map((period) => (
+              <button
+                key={`${period.start}-${period.endInclusive}`}
+                onClick={() => {
+                  setStartDate(period.start);
+                  setEndDate(period.endInclusive);
+                  setApplied({ from: period.start, to: period.endInclusive });
+                }}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold border ${
+                  requestedPeriod?.from === period.start && requestedPeriod?.to === period.endInclusive
+                    ? "bg-white text-black border-white"
+                    : "bg-[#14161F] border-white/10 text-white/60 hover:text-white"
+                }`}
+              >
+                {period.month}{period.partial ? " parcial" : ""}
+              </button>
+            ))}
           </div>
         )}
 
@@ -145,13 +217,15 @@ export default function AmCarteiraView({ slug }) {
         )}
 
         {/* KPIs */}
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 lg:grid-cols-7 gap-3">
           {[
             { label: "Creators", value: summary.total || 0, color: "#a855f7" },
             { label: "Ativos", value: summary.ativos || 0, color: "#10b981" },
             { label: "GMV Carteira", value: fmtBRL(summary.gmvTotal), color: "#1B3FE4" },
-            { label: "Comissão", value: fmtBRL(summary.comissaoTotal), color: "#D97706" },
+            { label: "Comissão Creator", value: fmtBRL(summary.comissaoTotal), color: "#D97706" },
             { label: "Receita Amplify", value: fmtBRL(summary.receitaTotal), color: "#25F4EE" },
+            { label: "Comissão média", value: fmtPct(summary.comissaoMediaCreator), color: "#f59e0b" },
+            { label: "Contratos 30d", value: summary.contratosVencendo || 0, color: "#ef4444" },
           ].map((k) => (
             <div key={k.label} className="bg-[#14161F] border border-white/10 rounded-2xl p-5">
               <div className="text-[10px] font-mono uppercase tracking-widest text-white/40 mb-1">
@@ -163,6 +237,55 @@ export default function AmCarteiraView({ slug }) {
             </div>
           ))}
         </div>
+
+        <div className="bg-[#14161F] border border-white/10 rounded-2xl p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-[10px] font-mono uppercase tracking-widest text-white/40">
+                Período contabilizado
+              </div>
+              <div className="text-sm font-bold text-white mt-1">
+                Pedido: {fmtDate(requestedPeriod?.from)} → {fmtDate(requestedPeriod?.to)}
+              </div>
+              <div className="text-xs text-white/45 mt-0.5">
+                Usado no cálculo: {fmtDate(effectiveCoverage?.from)} → {fmtDate(effectiveCoverage?.to)}
+              </div>
+            </div>
+            <div className="text-right text-[11px] text-white/40 max-w-xl">
+              <div>TikTok Shop Partner Center · snapshots JSON empacotados no hub.</div>
+              <div>
+                {(effectiveCoverage?.snapshots || []).length} snapshot{(effectiveCoverage?.snapshots || []).length === 1 ? "" : "s"} · {effectiveCoverage?.mode === "overlap_approximation" ? "aproximação por cobertura disponível" : "cobertura exata/contida"}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {contratosVencendo.length > 0 && (
+          <div className="bg-[#14161F] border border-red-500/20 rounded-2xl p-4">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <div>
+                <div className="text-[10px] font-mono uppercase tracking-widest text-red-300/70">
+                  Contratos próximos
+                </div>
+                <div className="text-sm text-white/50">
+                  {contratosVencendo.length} creator{contratosVencendo.length > 1 ? "s" : ""} com vencimento em até 30 dias
+                </div>
+              </div>
+            </div>
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
+              {contratosVencendo.slice(0, 6).map((c) => (
+                <div key={c.id || c.handle} className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2">
+                  <div className="font-bold text-sm text-white truncate">{c.nome || c.handle}</div>
+                  <div className="flex items-center justify-between gap-2 text-[11px] text-white/45">
+                    <span>@{c.handle}</span>
+                    <span className="font-mono text-red-300">{contractLabel(c.daysRemaining)}</span>
+                  </div>
+                  <div className="text-[10px] text-white/35 font-mono mt-1">{fmtDate(c.contractEnd)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Categorias */}
         {summary.byCategoria && Object.keys(summary.byCategoria).length > 0 && (
@@ -215,14 +338,18 @@ export default function AmCarteiraView({ slug }) {
         {/* Tabela */}
         <div className="bg-[#14161F] border border-white/10 rounded-2xl overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full min-w-[1120px] text-sm">
               <thead className="bg-white/[0.02] text-[10px] font-mono uppercase tracking-widest text-white/40">
                 <tr>
                   <th className="text-left px-4 py-3">Creator</th>
+                  <th className="text-left px-4 py-3">Nicho</th>
                   <th className="text-left px-4 py-3">Categoria</th>
                   <th className="text-right px-4 py-3">GMV</th>
-                  <th className="text-right px-4 py-3">Comissão</th>
-                  <th className="text-right px-4 py-3">Receita</th>
+                  <th className="text-right px-4 py-3">Comissão Creator</th>
+                  <th className="text-right px-4 py-3">Média</th>
+                  <th className="text-right px-4 py-3">Receita Amplify</th>
+                  <th className="text-left px-4 py-3">Contrato</th>
+                  <th className="text-left px-4 py-3">Insight</th>
                   <th className="text-left px-4 py-3">Última att</th>
                   <th className="text-right px-4 py-3">Ações</th>
                 </tr>
@@ -230,7 +357,7 @@ export default function AmCarteiraView({ slug }) {
               <tbody>
                 {filtered.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="text-center py-10 text-white/40 text-xs">
+                    <td colSpan={11} className="text-center py-10 text-white/40 text-xs">
                       {creators.length === 0
                         ? "Sua carteira tá vazia. Peça pro Gabriel preencher lib/carteiras.js."
                         : "Nenhum creator com esses filtros."}
@@ -243,7 +370,17 @@ export default function AmCarteiraView({ slug }) {
                       <tr key={c.id} className="border-t border-white/5 hover:bg-white/[0.02]">
                         <td className="px-4 py-3">
                           <div className="font-bold text-white">{c.nome || c.handle}</div>
-                          <div className="text-[10px] text-white/40">@{c.handle}</div>
+                          <div className="flex items-center gap-2 text-[10px] text-white/40">
+                            <span>@{c.handle}</span>
+                            {c.source === "demo" && (
+                              <span className="text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded px-1">
+                                demo
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-xs text-white/60">
+                          {c.nicho || "A definir"}
                         </td>
                         <td className="px-4 py-3">
                           <span
@@ -259,21 +396,43 @@ export default function AmCarteiraView({ slug }) {
                         <td className="px-4 py-3 text-right font-mono tabular-nums text-white/70">
                           {fmtBRL(c.comissao)}
                         </td>
+                        <td className="px-4 py-3 text-right font-mono tabular-nums" style={{ color: c.commissionRate < 10 ? "#f59e0b" : "#10b981" }}>
+                          {fmtPct(c.commissionRate)}
+                        </td>
                         <td className="px-4 py-3 text-right font-mono tabular-nums" style={{ color: "#25F4EE" }}>
                           {fmtBRL(c.amplifyRevenue)}
+                        </td>
+                        <td className="px-4 py-3 text-xs text-white/50 font-mono">
+                          {c.contractEnd ? (
+                            <span className={c.contractDaysRemaining <= 30 ? "text-red-300" : ""}>
+                              {fmtDate(c.contractEnd)}
+                              <span className="block text-[10px] text-white/35">
+                                {contractLabel(c.contractDaysRemaining)}
+                              </span>
+                            </span>
+                          ) : "—"}
+                        </td>
+                        <td className="px-4 py-3 text-xs text-white/60 max-w-[260px]">
+                          {c.insight || "Sem historico suficiente."}
                         </td>
                         <td className="px-4 py-3 text-xs text-white/50 font-mono">
                           {c.lastUpdate || "—"}
                         </td>
                         <td className="px-4 py-3 text-right">
-                          <a
-                            href={c.notionUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded bg-white/5 hover:bg-[#a855f7]/20 hover:text-[#a855f7] text-white/60"
-                          >
-                            Notion ↗
-                          </a>
+                          {c.notionUrl ? (
+                            <a
+                              href={c.notionUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded bg-white/5 hover:bg-[#a855f7]/20 hover:text-[#a855f7] text-white/60"
+                            >
+                              Notion ↗
+                            </a>
+                          ) : (
+                            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded bg-white/[0.03] text-white/25">
+                              Sem Notion
+                            </span>
+                          )}
                         </td>
                       </tr>
                     );
@@ -288,6 +447,18 @@ export default function AmCarteiraView({ slug }) {
           <p className="text-center text-[10px] text-white/30">
             Atualizado em {new Date(data.updatedAt).toLocaleString("pt-BR")}
           </p>
+        )}
+
+        {(data?.warning || data?.warnings?.length > 0) && (
+          <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-xs text-amber-100">
+            <div className="font-bold mb-1">Fonte de dados em atenção</div>
+            {data?.warning && <div className="text-amber-100/80">• {data.warning}</div>}
+            <div className="space-y-1 text-amber-100/80">
+              {(data.warnings || []).map((w) => (
+                <div key={w}>• {w}</div>
+              ))}
+            </div>
+          </div>
         )}
       </div>
     </div>

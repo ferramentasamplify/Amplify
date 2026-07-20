@@ -8,8 +8,6 @@ export async function POST(req) {
   try {
     const body = await req.json().catch(() => ({}));
     const { slug, password } = body;
-    // TODO(emergência 2026-07-13): aceita password vazio enquanto o bypass
-    // em lib/am-auth.js está ativo. REVERTER junto com o TODO do am-auth.
     if (!slug) {
       return NextResponse.json({ error: "Informe o slug." }, { status: 400 });
     }

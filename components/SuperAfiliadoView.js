@@ -21,7 +21,7 @@ const STATUS_LABEL = {
 };
 const INSIDE = new Set(["Agenciado", "Convite Aceito"]);
 
-const fmtBRL = (n) => "R$" + Number(n || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtBRL = (n) => "R$" + Number(n || 0).toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 const fmtDate = (iso) => new Date(iso).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
 const fmtWeek = (iso) => { const d = new Date(iso); return `${d.getDate()}/${d.getMonth() + 1}`; };
 const toLocal = (d) => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");

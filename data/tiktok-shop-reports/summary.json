@@ -1,0 +1,82 @@
+{
+  "generated_at": "2026-07-14T19:32:36.182Z",
+  "summary": [
+    {
+      "month": "2026-01",
+      "range": "2026-01-01_2026-02-01",
+      "partial": false,
+      "rows": 676,
+      "total_count": 676,
+      "files": {
+        "json": "creator_gmv__2026-01__2026-01-01_2026-02-01.json",
+        "csv": "creator_gmv__2026-01__2026-01-01_2026-02-01.csv"
+      }
+    },
+    {
+      "month": "2026-02",
+      "range": "2026-02-01_2026-03-01",
+      "partial": false,
+      "rows": 1033,
+      "total_count": 1038,
+      "files": {
+        "json": "creator_gmv__2026-02__2026-02-01_2026-03-01.json",
+        "csv": "creator_gmv__2026-02__2026-02-01_2026-03-01.csv"
+      }
+    },
+    {
+      "month": "2026-03",
+      "range": "2026-03-01_2026-04-01",
+      "partial": false,
+      "rows": 2089,
+      "total_count": 2141,
+      "files": {
+        "json": "creator_gmv__2026-03__2026-03-01_2026-04-01.json",
+        "csv": "creator_gmv__2026-03__2026-03-01_2026-04-01.csv"
+      }
+    },
+    {
+      "month": "2026-04",
+      "range": "2026-04-01_2026-05-01",
+      "partial": false,
+      "rows": 2667,
+      "total_count": 2706,
+      "files": {
+        "json": "creator_gmv__2026-04__2026-04-01_2026-05-01.json",
+        "csv": "creator_gmv__2026-04__2026-04-01_2026-05-01.csv"
+      }
+    },
+    {
+      "month": "2026-05",
+      "range": "2026-05-01_2026-06-01",
+      "partial": false,
+      "rows": 2622,
+      "total_count": 2674,
+      "files": {
+        "json": "creator_gmv__2026-05__2026-05-01_2026-06-01.json",
+        "csv": "creator_gmv__2026-05__2026-05-01_2026-06-01.csv"
+      }
+    },
+    {
+      "month": "2026-06",
+      "range": "2026-06-01_2026-07-01",
+      "partial": false,
+      "rows": 2808,
+      "total_count": 2920,
+      "files": {
+        "json": "creator_gmv__2026-06__2026-06-01_2026-07-01.json",
+        "csv": "creator_gmv__2026-06__2026-06-01_2026-07-01.csv"
+      }
+    },
+    {
+      "month": "2026-07",
+      "range": "2026-07-01_2026-07-15",
+      "partial": true,
+      "rows": 2544,
+      "total_count": 2559,
+      "files": {
+        "json": "creator_gmv__2026-07__2026-07-01_2026-07-15.json",
+        "csv": "creator_gmv__2026-07__2026-07-01_2026-07-15.csv"
+      }
+    }
+  ]
+}

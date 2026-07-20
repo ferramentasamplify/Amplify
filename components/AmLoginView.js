@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 export default function AmLoginView() {
   const router = useRouter();
   const sp = useSearchParams();
-  const next = sp.get("next") || "/club/am";
+  const rawNext = sp.get("next") || "/club/am";
 
   const [ams, setAms] = useState([]);
   const [slug, setSlug] = useState("");
@@ -38,7 +38,13 @@ export default function AmLoginView() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Falha no login.");
-      router.push(next);
+      const fallbackPath = data.am?.isAdmin
+        ? "/club/am/central"
+        : `/club/am/${data.am?.slug || slug}`;
+      const next = rawNext.startsWith("/") && !rawNext.startsWith("/club/am/login")
+        ? rawNext
+        : "/club/am";
+      router.push(next === "/club/am" ? fallbackPath : next);
       router.refresh();
     } catch (e) {
       setError(e.message);

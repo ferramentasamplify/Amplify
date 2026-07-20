@@ -1,6 +1,10 @@
 import { redirect } from "next/navigation";
+import { readSession } from "@/lib/am-auth";
 
-export default function AmIndex() {
-  // Leva o usuário pra tela de login; depois do login, o login redireciona pra carteira
-  redirect("/club/am/login?next=/club/am");
+export default async function AmIndex() {
+  const session = await readSession();
+  if (!session) {
+    redirect("/club/am/login?next=/club/am");
+  }
+  redirect(session.am.isAdmin ? "/club/am/central" : `/club/am/${session.slug}`);
 }

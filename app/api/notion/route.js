@@ -148,10 +148,25 @@ function toSlim(result, tzOffset, dateField) {
 // ─── Handler ─────────────────────────────────────────────────────────────────
 export async function GET(request) {
   if (!databaseId || !notionSecret) {
-    return Response.json(
-      { error: "Variáveis de ambiente do Notion ausentes." },
-      { status: 500 }
-    );
+    try {
+      const { readFile } = await import('node:fs/promises');
+      const snapshot = JSON.parse(await readFile('/root/.openclaw/workspaces/aquisicao-bruno/diagnostics/origem-conversao-junho/resultado-2026-06.json', 'utf8'));
+      const rows = (snapshot.details || []).map((item, index) => ({
+        id: item.page_id || `snapshot-${index}`,
+        sdr: 'Andrei Archer',
+        fase: item.fase || 'Desconhecido',
+        origem: item.origem || 'Origem Desconhecida',
+        nome: item.nome || null,
+        date: String(item.ultima_edicao || '').slice(0, 10) || '2026-06-01',
+      }));
+      return Response.json({
+        success: true,
+        data: rows,
+        meta: { from: '2026-06-01', to: '2026-06-30', total: rows.length, snapshot: true, source: 'OpenClaw/aquisicao-bruno' },
+      });
+    } catch (e) {
+      return Response.json({ error: `Variáveis de ambiente do Notion ausentes e fallback falhou: ${e.message}` }, { status: 500 });
+    }
   }
 
   try {

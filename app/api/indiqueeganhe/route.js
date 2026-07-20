@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { readFile } from 'fs/promises'
 import * as XLSX from 'xlsx'
 import { queryNotionDatabase } from '@/lib/notion-query'
 
@@ -32,8 +33,30 @@ function readPhase(prop) {
   return ''
 }
 
+function formatTikTokHandle(value) {
+  const raw = String(value || '').trim()
+  if (!raw) return 'desconhecido'
+
+  const atMatch = raw.match(/(?:^|tiktok\.com\/)@([^/?&#\s]+)/i)
+  if (atMatch?.[1]) return `@${atMatch[1].replace(/^@/, '').trim()}`
+
+  if (/^(?:https?:\/\/)?(?:www\.)?(?:vt|vm)\.tiktok\.com\//i.test(raw)) return 'não informado'
+
+  const pathMatch = raw.match(/tiktok\.com\/(?!link\/|share\/|t\/|v\/|embed\/|@)([^/?&#\s]+)/i)
+  if (pathMatch?.[1]) return `@${pathMatch[1].replace(/^@/, '').trim()}`
+
+  if (raw.startsWith('@') && raw.replace(/^@/, '').trim()) return raw
+  if (/^https?:\/\//i.test(raw)) return 'não informado'
+  return 'desconhecido'
+}
+
 function isAgenciadoStatus(status) {
-  return String(status || '').trim().toLowerCase() === 'agenciado'
+  const normalized = String(status || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+  return normalized === 'agenciado' || normalized === 'convite aceito'
 }
 
 function commissionForGmvRange(range) {
@@ -61,12 +84,15 @@ async function fetchAllLeads() {
 
   return results.map((page) => {
     const p = page.properties
-    const status = readPhase(p['Fase de agenciamento']) || readPhase(p['Qual a fase do agenciamento'])
-    const gmvRange = readPhase(p['Faixa de GMV (Faturamento Mensal no Tiktok Shop)'])
+    const status = readPhase(p['Fase de agenciamento'])
+    const gmvRange = readPhase(
+      p['Faixa de GMV (Faturamento Mensal no TikTok Shop)']
+      || p['Faixa de GMV (Faturamento Mensal no Tiktok Shop)']
+    )
     return {
       id: page.id,
       nome: p['Nome Completo']?.title?.[0]?.plain_text ?? '',
-      handle: (p['@ TikTok']?.rich_text?.[0]?.plain_text ?? '').replace(/^@/,'').trim(),
+      handle: formatTikTokHandle(p['@ TikTok']?.rich_text?.[0]?.plain_text ?? ''),
       status,
       gmvRange,
       generatedCommission: commissionForGmvRange(gmvRange),
@@ -77,6 +103,8 @@ async function fetchAllLeads() {
 }
 
 async function fetchXlsxSummary() {
+  if (!GDRIVE_KEY) return { totalGmv: 0, totalCom: 0 }
+
   try {
     const sinceDate = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)
     const untilDate = new Date().toISOString().slice(0, 10)
@@ -85,7 +113,7 @@ async function fetchXlsxSummary() {
       `&orderBy=modifiedTime+desc&pageSize=10&fields=files(id,name,modifiedTime)` +
       `&key=${GDRIVE_KEY}`
 
-    const listRes = await fetch(listUrl)
+    const listRes = await fetch(listUrl, { signal: AbortSignal.timeout(8000) })
     if (!listRes.ok) return { totalGmv: 0, totalCom: 0 }
     const { files } = await listRes.json()
     if (!files?.length) return { totalGmv: 0, totalCom: 0 }
@@ -97,7 +125,7 @@ async function fetchXlsxSummary() {
 
     let totalGmv = 0, totalCom = 0
     for (const file of relevant) {
-      const dlRes = await fetch(`https://www.googleapis.com/drive/v3/files/${file.id}?alt=media&key=${GDRIVE_KEY}`)
+      const dlRes = await fetch(`https://www.googleapis.com/drive/v3/files/${file.id}?alt=media&key=${GDRIVE_KEY}`, { signal: AbortSignal.timeout(8000) })
       if (!dlRes.ok) continue
       const wb = XLSX.read(await dlRes.arrayBuffer(), { type: 'array' })
       const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 })
@@ -125,9 +153,26 @@ async function fetchXlsxSummary() {
 
 let cache = null, cacheAt = 0
 const CACHE_TTL = 5 * 60 * 1000
+const SNAPSHOT_FILE = `${process.cwd()}/data/indiqueeganhe-full-snapshot.json`
 
-export async function GET() {
+async function readBundledSnapshot() {
   try {
+    const saved = JSON.parse(await readFile(SNAPSHOT_FILE, 'utf8'))
+    return saved?.data || saved
+  } catch {}
+  return null
+}
+
+export async function GET(req) {
+  try {
+    const forceLive = req.nextUrl.searchParams.get('live') === '1'
+    if (!forceLive) {
+      const snapshot = await readBundledSnapshot()
+      if (snapshot?.summary) {
+        return NextResponse.json({ ...snapshot.summary, source: 'bundled-snapshot' })
+      }
+    }
+
     if (cache && Date.now() - cacheAt < CACHE_TTL) return NextResponse.json(cache)
 
     const [leads, { totalGmv, totalCom }] = await Promise.all([fetchAllLeads(), fetchXlsxSummary()])

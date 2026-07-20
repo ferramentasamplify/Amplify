@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   CartesianGrid, Area, AreaChart, ComposedChart, Line,
@@ -17,20 +17,62 @@ const STATUS_COLOR = {
 };
 
 const fmtBRL = (n) => "R$" + Number(n || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtDecimal = (n) => Number(n || 0).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const fmtDate = (iso) => new Date(iso).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
 const fmtWeek = (iso) => { const d = new Date(iso); return `${d.getDate()}/${d.getMonth() + 1}`; };
+const fmtTableDate = (value) => {
+  const date = String(value || "").slice(0, 10);
+  const [year, month, day] = date.split("-");
+  return year && month && day ? `${day}/${month}/${year}` : "-";
+};
+const isAgenciado = (status) => {
+  const normalized = String(status || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  return normalized === "agenciado" || normalized === "convite aceito";
+};
+const isConvertido = (status) => {
+  return isAgenciado(status);
+};
+const normalizeSearch = (value) => String(value || "")
+  .toLowerCase()
+  .normalize("NFD")
+  .replace(/[\u0300-\u036f]/g, "")
+  .replace(/^@/, "")
+  .trim();
+const SUPER_AFILIADO_UTMS = new Set(["giselecorreia"]);
+const isSuperAfiliadoUtm = (utm) => SUPER_AFILIADO_UTMS.has(normalizeSearch(utm));
+const tableColumns = [
+  { key: "date", label: "Data" },
+  { key: "handle", label: "@ TikTok" },
+  { key: "status", label: "Status" },
+  { key: "gmvRange", label: "Faixa GMV" },
+  { key: "generatedCommission", label: "Comissao", align: "right" },
+];
+const utmCommissionColumns = [
+  { key: "utm", label: "Indicador" },
+  { key: "total", label: "Indicações", align: "right" },
+  { key: "agenciados", label: "Agenciados", align: "right" },
+  { key: "generatedCommission", label: "Comissao Total", align: "right" },
+];
 
 export default function IndiqueEGanheView() {
   const pathname = usePathname();
+  const router = useRouter();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedCreator, setSelectedCreator] = useState(null);
+  const [creatorFilter, setCreatorFilter] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [applied, setApplied] = useState({ start: "", end: "" });
   const [activeChart, setActiveChart] = useState("indiqueEarn");
+  const [tableMode, setTableMode] = useState("leads");
+  const [sortConfig, setSortConfig] = useState({ key: "date", direction: "desc" });
 
   useEffect(() => {
     const params = new URLSearchParams();
@@ -42,12 +84,177 @@ export default function IndiqueEGanheView() {
       .catch(() => { setError("Erro ao carregar."); setLoading(false); });
   }, [applied]);
 
-  const { summary: s, leads = [], byDay = [], weeklyData = [], weeklyDataByCreator = {} } = data || {};
+  useEffect(() => {
+    setSelectedCreator(null);
+    setStatusFilter("all");
+  }, [creatorFilter]);
+
+  function clearFilters() {
+    setStartDate("");
+    setEndDate("");
+    setCreatorFilter("");
+    setStatusFilter("all");
+    setSelectedCreator(null);
+    if (applied.start || applied.end) {
+      setLoading(true);
+      setError("");
+      setApplied({ start: "", end: "" });
+    }
+  }
+
+  const { leads = [], weeklyData = [], weeklyDataByCreator = {} } = data || {};
+  const creatorOptions = useMemo(() => {
+    return [...new Set(leads.map(l => String(l.utm || "").trim()).filter(utm => utm && !isSuperAfiliadoUtm(utm)))]
+      .sort((a, b) => a.localeCompare(b, "pt-BR"));
+  }, [leads]);
+  const scopedLeads = useMemo(() => {
+    const query = normalizeSearch(creatorFilter);
+    if (!query) return leads;
+    return leads.filter(l => normalizeSearch(l.utm).includes(query));
+  }, [creatorFilter, leads]);
+  const s = useMemo(() => {
+    const byStatus = scopedLeads.reduce((acc, lead) => {
+      const status = lead.status || "Sem status";
+      acc[status] = (acc[status] ?? 0) + 1;
+      return acc;
+    }, {});
+    const leadsWithGmv = scopedLeads.filter(l => l.gmv > 0).length;
+    const totalAgenciados = scopedLeads.filter(l => isAgenciado(l.status)).length;
+    const activeDays = new Set(scopedLeads.map(l => l.createdDate || l.created?.slice(0, 10)).filter(Boolean)).size;
+    const totalGmv = scopedLeads.reduce((sum, lead) => sum + Number(lead.gmv || 0), 0);
+    const totalCom = scopedLeads.reduce((sum, lead) => sum + Number(lead.comissao || 0), 0);
+    const totalGeneratedCommission = scopedLeads.reduce((sum, lead) => {
+      return isAgenciado(lead.status) ? sum + Number(lead.generatedCommission || 0) : sum;
+    }, 0);
+    return {
+      total: scopedLeads.length,
+      totalAgenciados,
+      avgEntriesPerDay: activeDays ? scopedLeads.length / activeDays : 0,
+      conversionRate: scopedLeads.length ? Math.round(totalAgenciados / scopedLeads.length * 100) : 0,
+      totalGeneratedCommission,
+      leadsWithGmv,
+      matchRate: scopedLeads.length ? Math.round(leadsWithGmv / scopedLeads.length * 100) : 0,
+      totalGmv,
+      totalCom,
+      indiqueEarn: totalCom * 0.10 * 0.20,
+      byStatus,
+    };
+  }, [scopedLeads]);
+  const byDay = useMemo(() => {
+    const grouped = scopedLeads.reduce((acc, lead) => {
+      const date = lead.createdDate || lead.created?.slice(0, 10);
+      if (!date) return acc;
+      if (!acc[date]) acc[date] = { n: 0, converted: 0 };
+      acc[date].n += 1;
+      if (isConvertido(lead.status)) acc[date].converted += 1;
+      return acc;
+    }, {});
+    return Object.entries(grouped)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, values]) => ({ date, ...values }));
+  }, [scopedLeads]);
+  const scopedWeeklyData = useMemo(() => {
+    if (!creatorFilter.trim()) return weeklyData;
+    const byDate = {};
+    scopedLeads.forEach((lead) => {
+      const points = weeklyDataByCreator[lead.handle] || [];
+      points.forEach((point) => {
+        if (!byDate[point.date]) byDate[point.date] = { date: point.date, gmv: 0, comissao: 0, indiqueEarn: 0 };
+        byDate[point.date].gmv += Number(point.gmv || 0);
+        byDate[point.date].comissao += Number(point.comissao || 0);
+        byDate[point.date].indiqueEarn += Number(point.indiqueEarn || 0);
+      });
+    });
+    return Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date));
+  }, [creatorFilter, scopedLeads, weeklyData, weeklyDataByCreator]);
   const statuses = Object.keys(s?.byStatus || {}).sort();
-  const filtered = leads.filter(l => statusFilter === "all" ? true : (l.status || "Sem status") === statusFilter);
+  const filtered = scopedLeads.filter(l => statusFilter === "all" ? true : (l.status || "Sem status") === statusFilter);
+  const utmCommissionRows = useMemo(() => {
+    const grouped = scopedLeads.reduce((acc, lead) => {
+      const utm = String(lead.utm || "").trim() || "Sem UTM";
+      if (!acc[utm]) acc[utm] = { utm, total: 0, agenciados: 0, generatedCommission: 0 };
+      acc[utm].total += 1;
+      if (isAgenciado(lead.status)) {
+        acc[utm].agenciados += 1;
+        acc[utm].generatedCommission += Number(lead.generatedCommission || 0);
+      }
+      return acc;
+    }, {});
+    return Object.values(grouped).sort((a, b) => {
+      return b.generatedCommission - a.generatedCommission || b.agenciados - a.agenciados || a.utm.localeCompare(b.utm, "pt-BR");
+    });
+  }, [scopedLeads]);
+  const sortedLeads = useMemo(() => {
+    const { key, direction } = sortConfig;
+    const dir = direction === "asc" ? 1 : -1;
+    const valueFor = (lead) => {
+      if (key === "date") return lead.createdDate || lead.created?.slice(0, 10) || "";
+      if (key === "generatedCommission") return Number(lead.generatedCommission || 0);
+      if (key === "status") return lead.status || "Sem status";
+      if (key === "gmvRange") return lead.gmvRange || "Não informado";
+      return lead.handle || "";
+    };
+
+    return [...filtered].sort((a, b) => {
+      const av = valueFor(a);
+      const bv = valueFor(b);
+      if (typeof av === "number" || typeof bv === "number") return (Number(av) - Number(bv)) * dir;
+      return String(av).localeCompare(String(bv), "pt-BR", { numeric: true, sensitivity: "base" }) * dir;
+    });
+  }, [filtered, sortConfig]);
+  function toggleSort(key) {
+    setSortConfig(current => ({
+      key,
+      direction: current.key === key && current.direction === "asc" ? "desc" : "asc",
+    }));
+  }
+  const sortedUtmCommissionRows = useMemo(() => {
+    const { key, direction } = sortConfig;
+    const dir = direction === "asc" ? 1 : -1;
+    const valueFor = (row) => {
+      if (key === "total" || key === "agenciados" || key === "generatedCommission") return Number(row[key] || 0);
+      return row.utm || "";
+    };
+
+    return [...utmCommissionRows].sort((a, b) => {
+      const av = valueFor(a);
+      const bv = valueFor(b);
+      if (typeof av === "number" || typeof bv === "number") return (Number(av) - Number(bv)) * dir;
+      return String(av).localeCompare(String(bv), "pt-BR", { numeric: true, sensitivity: "base" }) * dir;
+    });
+  }, [sortConfig, utmCommissionRows]);
+  const currentTableColumns = tableMode === "utmCommission" ? utmCommissionColumns : tableColumns;
+  const currentTableTotal = tableMode === "utmCommission" ? sortedUtmCommissionRows.length : sortedLeads.length;
+  async function exportCurrentTable() {
+    const XLSX = await import("xlsx");
+    const rows = tableMode === "utmCommission"
+      ? sortedUtmCommissionRows.map(row => ({
+          Indicador: row.utm,
+          Indicacoes: row.total,
+          Agenciados: row.agenciados,
+          "Comissao Total": row.generatedCommission,
+        }))
+      : sortedLeads.map(lead => ({
+          Data: fmtTableDate(lead.createdDate || lead.created),
+          "@ TikTok": lead.handle || "",
+          Status: lead.status || "Sem status",
+          "Faixa GMV": lead.gmvRange || "Não informado",
+          Comissao: Number(lead.generatedCommission || 0),
+          UTM_Source: lead.utm || "",
+        }));
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, tableMode === "utmCommission" ? "Comissao por Indicador" : "Indicacoes");
+    XLSX.writeFile(workbook, `indique-e-ganhe-${tableMode === "utmCommission" ? "comissao-indicador" : "indicacoes"}.xlsx`);
+  }
+  async function logout() {
+    await fetch("/api/indiqueeganhe-admin/logout", { method: "POST" });
+    router.push("/indiqueeganhe/login");
+    router.refresh();
+  }
   const chartColors = { gmv: "#1B3FE4", indiqueEarn: "#EAB308" };
   const chartLabels = { gmv: "GMV dos creators", indiqueEarn: "Comissão Indique" };
-  const activeData = selectedCreator && weeklyDataByCreator[selectedCreator.handle] ? weeklyDataByCreator[selectedCreator.handle] : weeklyData;
+  const activeData = selectedCreator && weeklyDataByCreator[selectedCreator.handle] ? weeklyDataByCreator[selectedCreator.handle] : scopedWeeklyData;
 
   return (
     <div className="min-h-screen bg-[#0A0B12] text-white font-sans">
@@ -63,6 +270,9 @@ export default function IndiqueEGanheView() {
               <span>{t.icon}</span> {t.label}
             </Link>
           ))}
+          <button onClick={logout} className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-white/40 hover:text-white hover:bg-white/5 transition-colors whitespace-nowrap">
+            Sair
+          </button>
         </div>
       </nav>
 
@@ -79,12 +289,21 @@ export default function IndiqueEGanheView() {
             <span className="text-white/30 text-xs">→</span>
             <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)}
               className="bg-[#14161F] border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:border-[#EAB308]"/>
+            <label htmlFor="creator-filter" className="text-xs text-white/40">Criador:</label>
+            <input id="creator-filter" list="creator-options" value={creatorFilter} onChange={e => setCreatorFilter(e.target.value)}
+              placeholder="Digite UTM"
+              className="bg-[#14161F] border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white placeholder:text-white/25 focus:outline-none focus:border-[#EAB308] max-w-[190px]"/>
+            <datalist id="creator-options">
+              {creatorOptions.map(creator => (
+                <option key={creator} value={creator}>{creator}</option>
+              ))}
+            </datalist>
             <button onClick={() => { setLoading(true); setError(""); setApplied({ start: startDate, end: endDate }); }}
               className="px-3 py-1.5 rounded-lg bg-[#EAB308] text-black text-xs font-bold hover:opacity-90">
               Filtrar
             </button>
-            {(applied.start || applied.end) && (
-              <button onClick={() => { setStartDate(""); setEndDate(""); setLoading(true); setError(""); setApplied({ start: "", end: "" }); }}
+            {(applied.start || applied.end || creatorFilter.trim()) && (
+              <button onClick={clearFilters}
                 className="px-3 py-1.5 rounded-lg bg-white/5 text-white/50 text-xs font-bold">x Limpar</button>
             )}
           </div>
@@ -96,9 +315,10 @@ export default function IndiqueEGanheView() {
           <div className="flex items-center justify-center h-40 text-white/40 text-sm">Carregando...</div>
         ) : s && (
           <>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
               {[
                 { label: "Total Indicações", value: String(s.total), color: "#fff" },
+                { label: "Média Entradas/Dia", value: fmtDecimal(s.avgEntriesPerDay), color: "#25F4EE" },
                 { label: "Total Agenciados", value: String(s.totalAgenciados || 0), color: "#10b981" },
                 { label: "Conversão", value: `${s.conversionRate || 0}%`, color: "#f97316" },
                 { label: "Comissão Total Gerada", value: fmtBRL(s.totalGeneratedCommission), color: "#EAB308" },
@@ -154,14 +374,14 @@ export default function IndiqueEGanheView() {
 
             {byDay.length > 0 && (
               <div className="bg-[#14161F] border border-white/10 rounded-2xl p-5">
-                <div className="text-xs font-mono uppercase tracking-widest text-white/40 mb-4">Indicações e convertidos por dia</div>
+                <div className="text-xs font-mono uppercase tracking-widest text-white/40 mb-4">Indicações e agenciados por dia</div>
                 <ResponsiveContainer width="100%" height={140}>
                   <ComposedChart data={byDay} barCategoryGap="30%">
                     <XAxis dataKey="date" tickFormatter={d => d.slice(5)} tick={{ fontSize: 9, fill: "rgba(255,255,255,0.4)" }} axisLine={false} tickLine={false}/>
                     <YAxis hide/>
                     <Tooltip formatter={(v, name) => [v, name]} labelFormatter={l => fmtDate(l)}
                       contentStyle={{ background: "#14161F", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 12 }}/>
-                    <Bar dataKey="converted" name="Convertidos" fill="#10B981" radius={[4, 4, 0, 0]}/>
+                    <Bar dataKey="converted" name="Agenciados" fill="#10B981" radius={[4, 4, 0, 0]}/>
                     <Line type="monotone" dataKey="n" name="Indicações" stroke="#EAB308" strokeWidth={2.5}
                       dot={{ r: 3, fill: "#EAB308", strokeWidth: 0 }} activeDot={{ r: 4 }}/>
                   </ComposedChart>
@@ -170,59 +390,95 @@ export default function IndiqueEGanheView() {
             )}
 
             <div className="bg-[#14161F] border border-white/10 rounded-2xl overflow-hidden">
-              <div className="px-5 py-4 border-b border-white/5 flex items-center justify-between flex-wrap gap-2">
-                <span className="text-xs font-mono uppercase tracking-widest text-white/40">
-                  Todas as {s.total} indicações
-                </span>
-                <div className="flex gap-2 overflow-x-auto">
-                  <button onClick={() => setStatusFilter("all")}
-                    className="text-xs font-bold px-3 py-1 rounded-full transition-colors whitespace-nowrap"
-                    style={{ background: statusFilter === "all" ? "#EAB308" : "rgba(255,255,255,0.05)", color: statusFilter === "all" ? "black" : "rgba(255,255,255,0.4)" }}>
-                    Todos
-                  </button>
-                  {statuses.map(status => (
-                    <button key={status} onClick={() => setStatusFilter(status)}
-                      className="text-xs font-bold px-3 py-1 rounded-full transition-colors whitespace-nowrap"
-                      style={{ background: statusFilter === status ? "#EAB308" : "rgba(255,255,255,0.05)", color: statusFilter === status ? "black" : "rgba(255,255,255,0.4)" }}>
-                      {status} ({s.byStatus[status]})
+                <div className="px-5 py-4 border-b border-white/5 flex items-center justify-between flex-wrap gap-2">
+                  <span className="text-xs font-mono uppercase tracking-widest text-white/40">
+                    {tableMode === "utmCommission" ? `${currentTableTotal} indicadores com comissão` : `Todas as ${s.total} indicações`}
+                  </span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="flex items-center gap-2 text-xs text-white/40">
+                      Visualização
+                      <select value={tableMode} onChange={e => {
+                        setTableMode(e.target.value);
+                        setSortConfig(e.target.value === "utmCommission"
+                          ? { key: "generatedCommission", direction: "desc" }
+                          : { key: "date", direction: "desc" });
+                      }}
+                        className="min-w-[210px] rounded-lg border border-white/10 bg-[#0A0B12] px-3 py-2 text-xs font-semibold text-white outline-none focus:border-[#EAB308]">
+                        <option value="leads">Indicações detalhadas</option>
+                        <option value="utmCommission">Comissão total por Indicador</option>
+                      </select>
+                    </label>
+                    {tableMode === "leads" && (
+                      <label className="flex items-center gap-2 text-xs text-white/40">
+                        Status
+                        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
+                          className="min-w-[210px] rounded-lg border border-white/10 bg-[#0A0B12] px-3 py-2 text-xs font-semibold text-white outline-none focus:border-[#EAB308]">
+                          <option value="all">Todos ({s.total})</option>
+                          {statuses.map(status => (
+                            <option key={status} value={status}>{status} ({s.byStatus[status]})</option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+                    <button type="button" onClick={exportCurrentTable}
+                      className="px-3 py-2 rounded-lg bg-[#EAB308] text-black text-xs font-bold hover:opacity-90">
+                      Exportar Excel
                     </button>
-                  ))}
+                  </div>
                 </div>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-[#0A0B12]">
-                    <tr>
-                      {["Creator","@ TikTok","Status","GMV","Comissao"].map((h) => (
-                        <th key={h} className="px-4 py-3 text-left text-[10px] font-mono uppercase tracking-wider text-white/40">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-white/5">
-                    {filtered.map((l) => (
-                      <tr key={l.id}
-                        onClick={() => l.gmv > 0 && setSelectedCreator(selectedCreator?.id === l.id ? null : l)}
-                        className={`hover:bg-white/5 transition-colors ${l.gmv > 0 ? "cursor-pointer" : ""}`}
-                        style={{ borderLeft: selectedCreator?.id === l.id ? "2px solid #EAB308" : "2px solid transparent" }}>
-                        <td className="px-4 py-3 text-sm font-medium text-white max-w-[140px] truncate">{l.nome || "-"}</td>
-                        <td className="px-4 py-3 text-sm text-white/50 font-mono">{l.handle || "-"}</td>
-                        <td className="px-4 py-3">
-                          <span className="text-[10px] font-bold px-2 py-1 rounded-full"
-                            style={{ background: (STATUS_COLOR[l.status] || "#9CA3AF") + "22", color: STATUS_COLOR[l.status] || "#9CA3AF" }}>
-                            {l.status || "Sem status"}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-sm font-bold text-right" style={{ color: l.gmv > 0 ? "#10b981" : "rgba(255,255,255,0.2)" }}>
-                          {fmtBRL(l.gmv)}
-                        </td>
-                        <td className="px-4 py-3 text-sm font-bold text-right" style={{ color: l.comissao > 0 ? "#EAB308" : "rgba(255,255,255,0.2)" }}>
-                          {fmtBRL(l.comissao)}
-                        </td>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-[#0A0B12]">
+                      <tr>
+                        {currentTableColumns.map((column) => (
+                          <th key={column.key} className={`px-4 py-3 text-[10px] font-mono uppercase tracking-wider text-white/40 ${column.align === "right" ? "text-right" : "text-left"}`}>
+                            <button type="button" onClick={() => toggleSort(column.key)}
+                              className={`inline-flex items-center gap-1 transition-colors hover:text-white ${column.align === "right" ? "justify-end" : "justify-start"}`}>
+                              {column.label}
+                              <span className="text-white/25">
+                                {sortConfig.key === column.key ? (sortConfig.direction === "asc" ? "↑" : "↓") : "↕"}
+                              </span>
+                            </button>
+                          </th>
+                        ))}
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody className="divide-y divide-white/5">
+                      {tableMode === "utmCommission" ? (
+                        sortedUtmCommissionRows.map((row) => (
+                          <tr key={row.utm} className="hover:bg-white/5 transition-colors">
+                            <td className="px-4 py-3 text-sm text-white/65 font-mono">{row.utm}</td>
+                            <td className="px-4 py-3 text-sm text-white/55 text-right font-semibold">{row.total}</td>
+                            <td className="px-4 py-3 text-sm text-[#10B981] text-right font-semibold">{row.agenciados}</td>
+                            <td className="px-4 py-3 text-sm font-bold text-right text-[#EAB308]">{fmtBRL(row.generatedCommission)}</td>
+                          </tr>
+                        ))
+                      ) : (
+                        sortedLeads.map((l) => (
+                          <tr key={l.id}
+                            onClick={() => l.gmv > 0 && setSelectedCreator(selectedCreator?.id === l.id ? null : l)}
+                            className={`hover:bg-white/5 transition-colors ${l.gmv > 0 ? "cursor-pointer" : ""}`}
+                            style={{ borderLeft: selectedCreator?.id === l.id ? "2px solid #EAB308" : "2px solid transparent" }}>
+                            <td className="px-4 py-3 text-sm text-white/55 font-mono whitespace-nowrap">{fmtTableDate(l.createdDate || l.created)}</td>
+                            <td className="px-4 py-3 text-sm text-white/50 font-mono">{l.handle || "-"}</td>
+                            <td className="px-4 py-3">
+                              <span className="text-[10px] font-bold px-2 py-1 rounded-full"
+                                style={{ background: (STATUS_COLOR[l.status] || "#9CA3AF") + "22", color: STATUS_COLOR[l.status] || "#9CA3AF" }}>
+                                {l.status || "Sem status"}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-sm font-semibold text-white/65 max-w-[160px] truncate">
+                              {l.gmvRange || "Não informado"}
+                            </td>
+                            <td className="px-4 py-3 text-sm font-bold text-right text-[#EAB308]">
+                              {fmtBRL(l.generatedCommission)}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
             </div>
           </>
         )}

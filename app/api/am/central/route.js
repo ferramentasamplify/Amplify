@@ -2,11 +2,39 @@ import { NextResponse } from "next/server";
 import { readSession } from "@/lib/am-auth";
 import { RACE_PARTICIPANTS, AM_BY_SLUG, publicAmData } from "@/lib/am-config";
 import { CARTEIRAS } from "@/lib/carteiras";
+import { demoCreatorsForHandles, demoInsight } from "@/lib/am-demo-data";
 import { queryNotionDatabase } from "@/lib/notion-query";
+import { aggregateTikTokSnapshots, cleanHandle, defaultSnapshotPeriod } from "@/lib/tiktok-shop-snapshots";
 
 export const dynamic = "force-dynamic";
 
 const CREATORS_DB = "2efb0bbef153811b946ddf8f0fff81a3";
+
+const clampTrackPct = (progressPct) => Math.max(8, Math.min(92, (progressPct / 100) * 92));
+const chunk = (items, size) => {
+  const out = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+};
+const handleFilter = (handles) => ({
+  or: handles.map((handle) => ({
+    property: "Qual seu @ do TikTok?",
+    rich_text: { contains: handle },
+  })),
+});
+const addMonthsISO = (dateString, months) => {
+  const d = new Date(`${dateString}T00:00:00Z`);
+  d.setUTCMonth(d.getUTCMonth() + months);
+  return d.toISOString().slice(0, 10);
+};
+const daysUntil = (dateString) => {
+  if (!dateString) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = new Date(`${dateString}T00:00:00`);
+  if (Number.isNaN(target.getTime())) return null;
+  return Math.ceil((target.getTime() - today.getTime()) / 86400000);
+};
 
 /**
  * GET /api/am/central
@@ -19,42 +47,60 @@ const CREATORS_DB = "2efb0bbef153811b946ddf8f0fff81a3";
  *
  * Acesso: precisa estar logado (qualquer AM).
  */
-export async function GET() {
+export async function GET(req) {
   try {
     const session = await readSession();
     if (!session) {
       return NextResponse.json({ error: "Sessão ausente. Faça login." }, { status: 401 });
     }
+    const url = new URL(req.url);
+    const defaultPeriod = defaultSnapshotPeriod();
+    const fromDate = url.searchParams.get("from") || defaultPeriod.from;
+    const toDate = url.searchParams.get("to") || defaultPeriod.to;
+    const previousFrom = addMonthsISO(fromDate, -1);
+    const previousTo = addMonthsISO(toDate, -1);
 
     // 1) busca handles por AM
     const carteirasPorAm = {};
     for (const am of RACE_PARTICIPANTS) {
-      carteirasPorAm[am.slug] = (CARTEIRAS[am.slug] || []).map((h) =>
-        String(h).toLowerCase().replace(/^@/, "").trim(),
-      );
+      carteirasPorAm[am.slug] = (CARTEIRAS[am.slug] || []).map(cleanHandle);
     }
+    const allCarteiraHandles = new Set(Object.values(carteirasPorAm).flat());
 
     // 2) busca creators no Notion
     const allPages = [];
-    let cursor;
-    do {
-      const res = await queryNotionDatabase(CREATORS_DB, { start_cursor: cursor, page_size: 100 });
-      allPages.push(...res.results);
-      cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
-    } while (cursor);
+    const sourceStatus = {
+      notion: { ok: true, message: "Notion carregado." },
+      sales: { ok: true, message: "Snapshot de vendas carregado." },
+      demo: { used: false, message: "" },
+    };
+    if (allCarteiraHandles.size > 0) try {
+      for (const batch of chunk([...allCarteiraHandles], 20)) {
+        let cursor;
+        do {
+          const res = await queryNotionDatabase(CREATORS_DB, {
+            start_cursor: cursor,
+            page_size: 100,
+            filter: handleFilter(batch),
+          });
+          allPages.push(...res.results);
+          cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
+        } while (cursor);
+      }
+    } catch (e) {
+      sourceStatus.notion = { ok: false, message: `Notion indisponivel: ${e.message}` };
+      sourceStatus.demo.used = true;
+      console.warn("[central] Notion indisponivel; dados faltantes serao marcados como demo:", e.message);
+    }
 
     const creatorsByHandle = {};
     for (const page of allPages) {
       const p = page.properties;
-      const handle = (
-        p["Qual seu @ do TikTok?"]?.rich_text?.[0]?.plain_text ?? ""
-      )
-        .replace(/^@/, "")
-        .trim()
-        .toLowerCase();
+      const handle = cleanHandle(p["Qual seu @ do TikTok?"]?.rich_text?.[0]?.plain_text);
       if (!handle) continue;
       creatorsByHandle[handle] = {
         id: page.id,
+        notionUrl: page.url || `https://www.notion.so/${page.id.replace(/-/g, "")}`,
         nome:
           p["Nome Completo"]?.rich_text?.[0]?.plain_text ??
           p["Nome"]?.title?.[0]?.plain_text ??
@@ -62,78 +108,102 @@ export async function GET() {
           handle,
         handle,
         categoria: p["Categoria Amplify Club"]?.select?.name ?? "Start",
+        nicho:
+          p["Nicho"]?.select?.name ??
+          p["Nicho"]?.multi_select?.[0]?.name ??
+          p["Categoria"]?.select?.name ??
+          "A definir",
+        contractEnd:
+          p["Data de Expiração"]?.date?.start ??
+          p["Fim do contrato"]?.date?.start ??
+          p["Contrato vence em"]?.date?.start ??
+          null,
       };
     }
 
-    // 3) GMV por handle (Drive XLSX)
-    const salesByHandle = {};
+    let salesSnapshot;
+    let previousSalesSnapshot;
     try {
-      const FOLDER_ID = process.env.GDRIVE_FOLDER_ID || "1VeOK2-DTfnDbbRueHpKK-a5QkQtyP_Nj";
-      const GDRIVE_KEY = process.env.GDRIVE_API_KEY || "";
-      const listUrl = `https://www.googleapis.com/drive/v3/files?q='${FOLDER_ID}'+in+parents+and+mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'&orderBy=modifiedTime+desc&pageSize=50&fields=files(id,name,modifiedTime)&key=${GDRIVE_KEY}`;
-      const listRes = await fetch(listUrl);
-      if (listRes.ok) {
-        const { files = [] } = await listRes.json();
-        const XLSX = await import("xlsx");
-        for (const file of files) {
-          try {
-            const dlRes = await fetch(`https://www.googleapis.com/drive/v3/files/${file.id}?alt=media&key=${GDRIVE_KEY}`);
-            if (!dlRes.ok) continue;
-            const buf = await dlRes.arrayBuffer();
-            const wb = XLSX.read(buf, { type: "array" });
-            const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 });
-            if (rows.length < 2) continue;
-            const header = rows[0];
-            const idx = (n) => header.findIndex((h) => String(h).toLowerCase().includes(n.toLowerCase()));
-            const iNome = idx("nome do criador") !== -1 ? idx("nome do criador") : idx("criador");
-            const iGmv = idx("valor bruto da mercadoria") !== -1 ? idx("valor bruto da mercadoria") : idx("gmv");
-            const iCom = idx("comissão estimada") !== -1 ? idx("comissão estimada") : idx("comiss");
-            const parseBRL = (v) => {
-              if (!v) return 0;
-              return parseFloat(String(v).replace("R$", "").replace(/\s/g, "").replace(/\./g, "").replace(",", ".").trim()) || 0;
-            };
-            const cleanHandle = (h) => {
-              h = String(h || "").toLowerCase().trim();
-              const m = h.match(/tiktok\.com\/@([^/?&\s]+)/);
-              if (m) return m[1];
-              return h.replace("@", "").split("?")[0].split("&")[0].trim();
-            };
-            for (const r of rows.slice(1)) {
-              const nome = String(r[iNome] ?? "").trim();
-              if (!nome || nome.toLowerCase() === "resumo") continue;
-              const h = cleanHandle(nome);
-              if (!salesByHandle[h]) salesByHandle[h] = { gmv: 0, comissao: 0 };
-              salesByHandle[h].gmv += parseBRL(r[iGmv]);
-              salesByHandle[h].comissao += parseBRL(r[iCom]);
-            }
-          } catch {}
-        }
-      }
+      salesSnapshot = aggregateTikTokSnapshots({ from: fromDate, to: toDate, handles: allCarteiraHandles });
+      previousSalesSnapshot = aggregateTikTokSnapshots({
+        from: previousFrom,
+        to: previousTo,
+        handles: allCarteiraHandles,
+      });
+      if (salesSnapshot.warnings.length > 0) sourceStatus.demo.used = true;
     } catch (e) {
+      sourceStatus.sales = { ok: false, message: `Snapshot TikTok Shop/GMV indisponivel: ${e.message}` };
+      sourceStatus.demo.used = true;
       console.error("[central] erro GMV:", e.message);
+      salesSnapshot = aggregateTikTokSnapshots({ handles: allCarteiraHandles });
+      previousSalesSnapshot = { byHandle: {}, coverage: null };
     }
 
     // 4) agrega por AM
     const ranking = RACE_PARTICIPANTS.map((am) => {
       const handles = carteirasPorAm[am.slug] || [];
+      const demoByHandle = Object.fromEntries(demoCreatorsForHandles(handles).map((c) => [c.handle, c]));
       const detalhes = handles.map((h) => {
-        const c = creatorsByHandle[h] || { id: null, nome: h, handle: h, categoria: "Start" };
-        const s = salesByHandle[h] || { gmv: 0, comissao: 0 };
-        return { ...c, gmv: s.gmv, comissao: s.comissao, amplifyRevenue: s.comissao * 0.1 };
+        const demo = demoByHandle[h];
+        const liveCreator = creatorsByHandle[h];
+        const c = liveCreator || demo || { id: null, nome: h, handle: h, categoria: "Start" };
+        const s = salesSnapshot.byHandle[h] || { gmv: 0, comissao: 0 };
+        const previousSale = previousSalesSnapshot.byHandle?.[h] || {};
+        const gmv = s.gmv || demo?.currentGmv || 0;
+        const comissao = s.comissao || demo?.comissao || 0;
+        const contractEnd = liveCreator?.contractEnd || null;
+        return {
+          ...c,
+          id: c.id || `demo-${h}`,
+          nicho: c.nicho || demo?.nicho || "A definir",
+          contractEnd,
+          notionUrl: c.notionUrl || demo?.notionUrl || null,
+          insight: c.insight || demoInsight(demo),
+          source: creatorsByHandle[h] ? "live" : "demo",
+          sourceLabel: creatorsByHandle[h]
+            ? "Notion"
+            : "Dado demonstrativo para apresentacao",
+          gmv,
+          previousGmv: previousSale.gmv || 0,
+          comissao,
+          orders: s.orders || 0,
+          liveGmv: s.liveGmv || 0,
+          videoGmv: s.videoGmv || 0,
+          directGmv: s.directGmv || 0,
+          amplifyRevenue: comissao * 0.1,
+          contractDaysRemaining: daysUntil(contractEnd),
+        };
       }).sort((a, b) => b.gmv - a.gmv);
 
       const gmvTotal = detalhes.reduce((acc, c) => acc + c.gmv, 0);
+      const previousGmvTotal = detalhes.reduce((acc, c) => acc + (c.previousGmv || 0), 0);
       const comTotal = detalhes.reduce((acc, c) => acc + c.comissao, 0);
       const recTotal = detalhes.reduce((acc, c) => acc + c.amplifyRevenue, 0);
       const ativos = detalhes.filter((c) => c.gmv > 0).length;
+      const expiring90 = detalhes
+        .filter((c) => c.contractDaysRemaining !== null && c.contractDaysRemaining <= 90)
+        .sort((a, b) => (a.contractDaysRemaining ?? 999) - (b.contractDaysRemaining ?? 999));
+      const expiring30 = expiring90.filter((c) => c.contractDaysRemaining <= 30);
 
       return {
         am: publicAmData(am),
         gmvTotal,
+        previousGmvTotal,
         comissaoTotal: comTotal,
         receitaTotal: recTotal,
         carteiraSize: handles.length,
         ativos,
+        contratos30: expiring30.length,
+        contratos90: expiring90.length,
+        contratosVencendo: expiring90.slice(0, 6).map((c) => ({
+          id: c.id,
+          nome: c.nome,
+          handle: c.handle,
+          contractEnd: c.contractEnd,
+          daysRemaining: c.contractDaysRemaining,
+          notionUrl: c.notionUrl || null,
+          gmv: c.gmv,
+        })),
         top5: detalhes.slice(0, 5),
       };
     }).sort((a, b) => b.gmvTotal - a.gmvTotal);
@@ -143,27 +213,57 @@ export async function GET() {
       r.position = i + 1;
     });
 
-    // Calcula "pista" — cada AM comanda de 0% a 100% baseado na maior GMV
+    // Calcula "pista" contra a propria base do mes anterior.
     const maxGmv = Math.max(...ranking.map((r) => r.gmvTotal), 1);
     const track = ranking.map((r) => ({
-      am: publicAmData(r.am),
+      am: r.am,
       position: r.position,
       gmvTotal: r.gmvTotal,
+      previousGmvTotal: r.previousGmvTotal,
+      progressVsPreviousPct:
+        r.previousGmvTotal > 0 ? (r.gmvTotal / r.previousGmvTotal) * 100 : 0,
       comissaoTotal: r.comissaoTotal,
       receitaTotal: r.receitaTotal,
       carteiraSize: r.carteiraSize,
       ativos: r.ativos,
-      // posição na pista (0-100)
-      trackPositionPct: (r.gmvTotal / maxGmv) * 100,
+      contratos30: r.contratos30,
+      contratos90: r.contratos90,
+      contratosVencendo: r.contratosVencendo,
+      // posição visual limitada a 92%; acima de 100% vira badge, nao estoura a regua.
+      trackPositionPct: clampTrackPct(
+        r.previousGmvTotal > 0 ? (r.gmvTotal / r.previousGmvTotal) * 100 : 0,
+      ),
       // distancia do líder (em R$)
-      gapFromLeader: i => Math.max(0, ranking[0].gmvTotal - r.gmvTotal),
+      gapFromLeader: Math.max(0, ranking[0].gmvTotal - r.gmvTotal),
       top5: r.top5,
     }));
+
+    sourceStatus.demo.message = sourceStatus.demo.used
+      ? "Parte dos dados exibidos esta rotulada como demonstrativa porque Notion ou snapshot TikTok Shop nao retornou fonte real."
+      : "Sem uso de dados demonstrativos.";
+    const warnings = [
+      !sourceStatus.notion.ok ? sourceStatus.notion.message : null,
+      !sourceStatus.sales.ok ? sourceStatus.sales.message : null,
+      ...(salesSnapshot?.warnings || []),
+      sourceStatus.demo.used ? sourceStatus.demo.message : null,
+    ].filter(Boolean);
 
     return NextResponse.json({
       ranking: track,
       total: ranking.length,
       maxGmv,
+      sourceStatus,
+      warnings,
+      dataFreshness: {
+        strategy: "daily_tiktok_shop_snapshot",
+        filterMode: "partner_center_snapshot_cache",
+        requestedPeriod: salesSnapshot.requested,
+        effectiveCoverage: salesSnapshot.coverage,
+        previousCoverage: previousSalesSnapshot.coverage,
+        availablePeriods: salesSnapshot.availablePeriods,
+        message:
+          "GMV e comissao vêm dos JSONs coletados no TikTok Shop Partner Center. A central aceita from/to e informa a cobertura efetiva usada.",
+      },
       updatedAt: new Date().toISOString(),
     });
   } catch (e) {

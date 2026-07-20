@@ -29,6 +29,20 @@ function matchCreator(handle, salesMap) {
   return null
 }
 
+function emptyDriveResult(sinceDate, untilDate, mode, warning) {
+  return {
+    weeklySalesMap: {},
+    weeklyAmplify: {},
+    coverage: {
+      requested: { startDate: sinceDate, endDate: untilDate },
+      effective: { startDate: null, endDate: null },
+      matchedFiles: [],
+      mode,
+      warnings: warning ? [warning] : [],
+    },
+  }
+}
+
 async function fetchCreators() {
   const results = []
   let cursor
@@ -54,15 +68,15 @@ async function fetchDriveXlsx(sinceDate, untilDate) {
   try {
     const listUrl = `https://www.googleapis.com/drive/v3/files?q='${FOLDER_ID}'+in+parents+and+mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'&orderBy=modifiedTime+desc&pageSize=50&fields=files(id,name,modifiedTime)&key=${GDRIVE_KEY}`
     const listRes = await fetch(listUrl)
-    if (!listRes.ok) return { weeklySalesMap: {}, weeklyAmplify: {} }
+    if (!listRes.ok) return emptyDriveResult(sinceDate, untilDate, 'unavailable', 'Nao foi possivel listar os arquivos semanais do Drive para este filtro.')
     const { files } = await listRes.json()
-    if (!files?.length) return { weeklySalesMap: {}, weeklyAmplify: {} }
+    if (!files?.length) return emptyDriveResult(sinceDate, untilDate, 'empty', 'Nenhum arquivo semanal encontrado no Drive para calcular este dashboard.')
 
     const relevant = files.filter(f => {
       const m = f.name.match(/(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})/)
       return m ? m[1] <= untilDate && m[2] >= sinceDate : false
     })
-    if (!relevant.length) return { weeklySalesMap: {}, weeklyAmplify: {} }
+    if (!relevant.length) return emptyDriveResult(sinceDate, untilDate, 'no_overlap', 'Nao ha arquivo semanal com sobreposicao ao periodo selecionado.')
 
     const processed = await Promise.all(relevant.map(async file => {
       try {
@@ -81,16 +95,37 @@ async function fetchDriveXlsx(sinceDate, untilDate) {
         const dataRows = rows.slice(1).filter(r => { const n = String(r[iNome]??'').trim(); return n && n !== '-' && n.toLowerCase() !== 'resumo' })
         const sales = dataRows.map(r => ({ creator: cleanHandle(String(r[iNome]??'')), gmv: parseBRL(r[iGmv]), comissao: parseBRL(r[iCom]) })).filter(r => r.creator)
         const m = file.name.match(/(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})/)
-        return { weekEnd: m?.[2], sales, amplifyGmv: resumo ? parseBRL(resumo[iGmv]) : dataRows.reduce((s,r)=>s+parseBRL(r[iGmv]),0), amplifyCom: resumo ? parseBRL(resumo[iCom]) : dataRows.reduce((s,r)=>s+parseBRL(r[iCom]),0) }
+        return {
+          weekStart: m?.[1],
+          weekEnd: m?.[2],
+          fileName: file.name,
+          sales,
+          amplifyGmv: resumo ? parseBRL(resumo[iGmv]) : dataRows.reduce((s,r)=>s+parseBRL(r[iGmv]),0),
+          amplifyCom: resumo ? parseBRL(resumo[iCom]) : dataRows.reduce((s,r)=>s+parseBRL(r[iCom]),0),
+        }
       } catch { return null }
     }))
 
-    const weeklySalesMap = {}, weeklyAmplify = {}
+    const weeklySalesMap = {}, weeklyAmplify = {}, matchedFiles = []
     processed.filter(Boolean).forEach(v => {
       if (v.weekEnd) { weeklySalesMap[v.weekEnd] = v.sales; weeklyAmplify[v.weekEnd] = { gmv: v.amplifyGmv, com: v.amplifyCom } }
+      if (v.weekStart && v.weekEnd) matchedFiles.push({ name: v.fileName, startDate: v.weekStart, endDate: v.weekEnd })
     })
-    return { weeklySalesMap, weeklyAmplify }
-  } catch { return { weeklySalesMap: {}, weeklyAmplify: {} } }
+    const starts = matchedFiles.map(f => f.startDate).sort()
+    const ends = matchedFiles.map(f => f.endDate).sort()
+    const exactFile = matchedFiles.length === 1 && matchedFiles[0].startDate === sinceDate && matchedFiles[0].endDate === untilDate
+    return {
+      weeklySalesMap,
+      weeklyAmplify,
+      coverage: {
+        requested: { startDate: sinceDate, endDate: untilDate },
+        effective: { startDate: starts[0] ?? null, endDate: ends.at(-1) ?? null },
+        matchedFiles,
+        mode: exactFile ? 'exact_file' : 'weekly_overlap',
+        warnings: exactFile ? [] : ['Filtro calculado por arquivos semanais do Drive: o dashboard soma semanas que sobrepoem o periodo, nao um recorte diario exato.'],
+      },
+    }
+  } catch { return emptyDriveResult(sinceDate, untilDate, 'error', 'Erro ao carregar arquivos semanais do Drive para este filtro.') }
 }
 
 let cache = null, cacheAt = 0
@@ -103,7 +138,7 @@ export async function GET(req) {
 
     const creators = await fetchCreators()
     const firstDate = startDate || '2024-01-01'
-    const { weeklySalesMap, weeklyAmplify } = await fetchDriveXlsx(firstDate, endDate)
+    const { weeklySalesMap, weeklyAmplify, coverage } = await fetchDriveXlsx(firstDate, endDate)
 
     const accumulatedSales = {}
     Object.values(weeklySalesMap).forEach(ws => ws.forEach(s => {
@@ -141,7 +176,7 @@ export async function GET(req) {
     const result = {
       summary: { total: enriched.length, active, totalGmv, totalCom, amplifyTotal, byCategoria, updatedAt: new Date().toISOString() },
       creators: enriched.sort((a,b) => b.gmv - a.gmv),
-      weeklyAmplifyData, weeklyByCreator,
+      weeklyAmplifyData, weeklyByCreator, dataCoverage: coverage,
     }
     if (!startDate) { cache = result; cacheAt = Date.now() }
     return NextResponse.json(result)

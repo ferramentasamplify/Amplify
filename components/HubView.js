@@ -30,7 +30,19 @@ function MiniKpi({ label, value, color = "#25F4EE", sub }) {
 function SectionCard({ title, icon, href, color, children, loading, error }) {
   return (
     <div
-      className="bg-[#14161F] border border-white/10 rounded-2xl overflow-hidden flex flex-col"
+      role="link"
+      tabIndex={0}
+      onClick={(e) => {
+        if (e.target.closest("a")) return;
+        window.location.href = href;
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          window.location.href = href;
+        }
+      }}
+      className="bg-[#14161F] border border-white/10 rounded-2xl overflow-hidden flex flex-col cursor-pointer transition-colors hover:border-white/20"
       style={{ borderTopColor: color, borderTopWidth: 2 }}
     >
       <div className="flex items-center justify-between px-5 py-4 border-b border-white/5">
@@ -124,35 +136,29 @@ export default function HubView() {
     setLoading({ notion: true, sa: true, ig: true, club: true, meta: true });
     setErrors({});
 
-    // Aquisição (Notion)
-    fetch(`/api/notion?since=${dateRange.minus30}&until=${dateRange.today}&level=summary`)
+    // Resumo leve da Home — evita baixar JSONs gigantes no navegador apos login.
+    fetch("/api/hub-summary")
       .then(r => r.json())
-      .then(d => { setNotion(d); setLoading(p => ({ ...p, notion: false })); })
-      .catch(e => { setErrors(p => ({ ...p, notion: e.message })); setLoading(p => ({ ...p, notion: false })); });
-
-    // Super Afiliado
-    fetch("/api/superafiliado")
-      .then(r => r.json())
-      .then(d => { setSa(d); setLoading(p => ({ ...p, sa: false })); })
-      .catch(e => { setErrors(p => ({ ...p, sa: e.message })); setLoading(p => ({ ...p, sa: false })); });
-
-    // Indique e Ganhe
-    fetch("/api/indiqueeganhe")
-      .then(r => r.json())
-      .then(d => { setIg(d); setLoading(p => ({ ...p, ig: false })); })
-      .catch(e => { setErrors(p => ({ ...p, ig: e.message })); setLoading(p => ({ ...p, ig: false })); });
-
-    // Amplify Club
-    fetch("/api/club")
-      .then(r => r.json())
-      .then(d => { setClub(d); setLoading(p => ({ ...p, club: false })); })
-      .catch(e => { setErrors(p => ({ ...p, club: e.message })); setLoading(p => ({ ...p, club: false })); });
-
-    // Meta Ads
-    fetch(`/api/meta?since=${dateRange.minus30}&until=${dateRange.today}&level=campaign`)
-      .then(r => r.json())
-      .then(d => { setMeta(d); setLoading(p => ({ ...p, meta: false })); })
-      .catch(e => { setErrors(p => ({ ...p, meta: e.message })); setLoading(p => ({ ...p, meta: false })); });
+      .then(d => {
+        if (d.acquisition) setNotion(d.acquisition);
+        if (d.superAfiliado) setSa(d.superAfiliado);
+        if (d.indique) setIg(d.indique);
+        if (d.club) setClub(d.club);
+        if (d.meta) setMeta(d.meta);
+        setErrors(p => ({
+          ...p,
+          ...(d.acquisitionError ? { notion: d.acquisitionError } : {}),
+          ...(d.superAfiliadoError ? { sa: d.superAfiliadoError } : {}),
+          ...(d.indiqueError ? { ig: d.indiqueError } : {}),
+          ...(d.clubError ? { club: d.clubError } : {}),
+          ...(d.metaError ? { meta: d.metaError } : {}),
+        }));
+        setLoading(p => ({ ...p, notion: false, sa: false, ig: false, club: false, meta: false }));
+      })
+      .catch(e => {
+        setErrors(p => ({ ...p, notion: e.message, sa: e.message, ig: e.message, club: e.message, meta: e.message }));
+        setLoading(p => ({ ...p, notion: false, sa: false, ig: false, club: false, meta: false }));
+      });
 
     setLastUpdate(new Date());
   }, [authed, dateRange]);
@@ -210,10 +216,10 @@ export default function HubView() {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[
             {
-              label: "Gasto Meta (30d)",
+              label: "Gasto Meta MTD",
               value: fmtBRL(metaT?.spend),
               color: "#EA1A4E",
-              sub: metaT ? `${fmtNum(metaT.leads)} leads` : null,
+              sub: metaT ? `${fmtNum(metaT.leads)} leads · OpenClaw` : null,
             },
             {
               label: "CPL Meta",
@@ -225,10 +231,10 @@ export default function HubView() {
               label: "Creators Ativos",
               value: fmtNum(clubData?.activeCreators),
               color: "#a855f7",
-              sub: clubData ? `${fmtNum(clubData?.total)} no clube` : null,
+              sub: clubData ? `${fmtNum(clubData?.total)} no clube · ${clubData.referenceLabel || "snapshot"}` : null,
             },
             {
-              label: "GMV Club (30d)",
+              label: "GMV Club",
               value: fmtBRL(clubData?.totalGmv),
               color: "#10b981",
               sub: clubData ? `Receita ${fmtBRL(clubData?.amplifyRevenue)}` : null,
@@ -252,6 +258,19 @@ export default function HubView() {
           <h2 className="text-xs font-mono uppercase tracking-widest text-white/40 pt-2">Aquisição</h2>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
 
+            {/* Growth Central */}
+            <SectionCard
+              title="Growth Central"
+              icon="🧭"
+              href="/hub/growth"
+              color="#25F4EE"
+            >
+              <MiniKpi label="Creators MTD" value="2.121" color="#a78bfa" sub="CPL real R$ 2,90" />
+              <MiniKpi label="Marcas MTD" value="44" color="#fb923c" sub="CPL real R$ 29,13" />
+              <MiniKpi label="Canais" value="25" color="#25F4EE" sub="mapa Content-led Growth" />
+              <MiniKpi label="Gargalo" value="UTM" color="#EA1A4E" sub="creator sem campaign/adset/ad" />
+            </SectionCard>
+
             {/* Dash Aquisição */}
             <SectionCard
               title="Dashboard Aquisição"
@@ -262,30 +281,26 @@ export default function HubView() {
               error={errors.notion}
             >
               <MiniKpi
-                label="Leads (30d)"
+                label="Leads"
                 value={fmtNum(notionT?.total_leads ?? notionT?.leads)}
                 color="#25F4EE"
+                sub={notionT?.referenceLabel}
               />
               <MiniKpi
-                label="Agendamentos"
-                value={fmtNum(notionT?.agendamentos ?? notionT?.agendados)}
+                label="Agenciados"
+                value={fmtNum(notionT?.agenciados)}
                 color="#1742E6"
               />
               <MiniKpi
-                label="Contratos"
-                value={fmtNum(notionT?.contratos ?? notionT?.fechados)}
-                color="#10b981"
+                label="Conv. Lead→Agenciado"
+                value={notionT?.conversion != null ? fmtPct(notionT.conversion) : "—"}
+                color="#f97316"
               />
               <MiniKpi
-                label="Conv. Lead→Contrato"
-                value={
-                  notionT?.total_leads && notionT?.contratos
-                    ? fmtPct((notionT.contratos / notionT.total_leads) * 100)
-                    : notionT?.conversion_rate
-                    ? fmtPct(notionT.conversion_rate)
-                    : "—"
-                }
-                color="#f97316"
+                label="Top origem"
+                value={notionT?.topOrigemLeads ? fmtNum(notionT.topOrigemLeads) : "—"}
+                color="#10b981"
+                sub={notionT?.topOrigem}
               />
             </SectionCard>
 
@@ -298,25 +313,45 @@ export default function HubView() {
               loading={loading.sa}
               error={errors.sa}
             >
-              <MiniKpi label="Indicações" value={fmtNum(saData?.total)} color="#fff" />
-              <MiniKpi label="Agenciados" value={fmtNum(saData?.agenciados)} color="#EA1A4E" />
-              <MiniKpi label="Conversão" value={saData?.conversion != null ? `${saData.conversion}%` : "—"} color="#f97316" />
-              <MiniKpi label="GMV (30d)" value={fmtBRL(saData?.totalGmv)} color="#10b981" />
+              <MiniKpi
+                label="GMV total base"
+                value={fmtBRL(saData?.amplifyTotalGmv)}
+                color="#10b981"
+                sub="todos os creators agenciados"
+              />
+              <MiniKpi
+                label="Receita Amplify"
+                value={fmtBRL(saData?.amplifyTotalRevenue)}
+                color="#25F4EE"
+                sub="1% do GMV: 10% creator × 10% Amplify"
+              />
+              <MiniKpi
+                label="Creators indicados"
+                value={fmtNum(saData?.total)}
+                color="#fff"
+                sub="programa Super Afiliado"
+              />
+              <MiniKpi
+                label="Agenciados"
+                value={fmtNum(saData?.agenciados)}
+                color="#EA1A4E"
+                sub="indicados convertidos"
+              />
             </SectionCard>
 
             {/* Indique e Ganhe */}
             <SectionCard
               title="Indique e Ganhe"
               icon="🎁"
-              href="/indiqueeganhe"
+              href="/indiqueeganhe/login?next=/indiqueeganhe"
               color="#EAB308"
               loading={loading.ig}
               error={errors.ig}
             >
               <MiniKpi label="Indicações" value={fmtNum(igData?.total)} color="#fff" />
-              <MiniKpi label="GMV (30d)" value={fmtBRL(igData?.totalGmv)} color="#10b981" />
-              <MiniKpi label="Comissão" value={fmtBRL(igData?.totalCom)} color="#EAB308" />
-              <MiniKpi label="Repasse" value={fmtBRL(igData?.indiqueEarn)} color="#f97316" />
+              <MiniKpi label="Agenciados" value={fmtNum(igData?.agenciados)} color="#10b981" />
+              <MiniKpi label="Conversão" value={igData?.conversion != null ? fmtPct(igData.conversion) : "—"} color="#EAB308" />
+              <MiniKpi label="Comissão gerada" value={fmtBRL(igData?.totalGeneratedCommission)} color="#f97316" />
             </SectionCard>
           </div>
         </div>
@@ -355,8 +390,8 @@ export default function HubView() {
             error={errors.club}
           >
             <MiniKpi label="Total Creators" value={fmtNum(clubData?.total)} color="#a855f7" />
-            <MiniKpi label="Ativos (30d)" value={fmtNum(clubData?.activeCreators)} color="#10b981" />
-            <MiniKpi label="GMV (30d)" value={fmtBRL(clubData?.totalGmv)} color="#10b981" />
+            <MiniKpi label="Creators ativos" value={fmtNum(clubData?.activeCreators)} color="#10b981" />
+            <MiniKpi label="GMV" value={fmtBRL(clubData?.totalGmv)} color="#10b981" />
             <MiniKpi label="Receita Amplify" value={fmtBRL(clubData?.amplifyRevenue)} color="#25F4EE" />
             {clubData?.byCategoria && Object.entries(clubData.byCategoria).map(([cat, count]) => (
               <MiniKpi key={cat} label={cat} value={fmtNum(count)} color="#fff" sub="creators" />
@@ -374,8 +409,9 @@ export default function HubView() {
               { href: "/metricas",           label: "Métricas",     icon: "🎯" },
               { href: "/custos",             label: "Custos",       icon: "💰" },
               { href: "/meta",               label: "Meta Ads",     icon: "📣" },
+              { href: "/hub/growth",         label: "Growth Central", icon: "🧭" },
               { href: "/superafiliado",      label: "Super Afiliado", icon: "🤝" },
-              { href: "/indiqueeganhe",      label: "Indique e Ganhe", icon: "🎁" },
+              { href: "/indiqueeganhe/login?next=/indiqueeganhe", label: "Indique e Ganhe", icon: "🎁" },
               { href: "/club",               label: "Amplify Club", icon: "💎" },
             ].map((t) => (
               <Link

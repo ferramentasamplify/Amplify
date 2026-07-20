@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { readFile, writeFile } from 'fs/promises'
 import * as XLSX from 'xlsx'
 import { queryNotionDatabase } from '@/lib/notion-query'
 
@@ -7,6 +8,12 @@ export const dynamic = 'force-dynamic'
 const INDIQUE_DB = '31ab0bbef15380a1ab97caa5c68e9813'
 const FOLDER_ID  = process.env.GDRIVE_FOLDER_ID || '1VeOK2-DTfnDbbRueHpKK-a5QkQtyP_Nj'
 const GDRIVE_KEY = process.env.GDRIVE_API_KEY || ''
+const BR_DATE_FORMATTER = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'America/Sao_Paulo',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+})
 
 function parseBRL(v) {
   if (!v) return 0
@@ -18,6 +25,23 @@ function cleanHandle(h) {
   const m = h.match(/tiktok\.com\/@([^/?&\s]+)/)
   if (m) return m[1]
   return h.replace('@','').split('?')[0].split('&')[0].trim()
+}
+
+function formatTikTokHandle(value) {
+  const raw = String(value || '').trim()
+  if (!raw) return 'desconhecido'
+
+  const atMatch = raw.match(/(?:^|tiktok\.com\/)@([^/?&#\s]+)/i)
+  if (atMatch?.[1]) return `@${atMatch[1].replace(/^@/, '').trim()}`
+
+  if (/^(?:https?:\/\/)?(?:www\.)?(?:vt|vm)\.tiktok\.com\//i.test(raw)) return 'não informado'
+
+  const pathMatch = raw.match(/tiktok\.com\/(?!link\/|share\/|t\/|v\/|embed\/|@)([^/?&#\s]+)/i)
+  if (pathMatch?.[1]) return `@${pathMatch[1].replace(/^@/, '').trim()}`
+
+  if (raw.startsWith('@') && raw.replace(/^@/, '').trim()) return raw
+  if (/^https?:\/\//i.test(raw)) return 'não informado'
+  return 'desconhecido'
 }
 
 function matchCreator(handle, salesMap) {
@@ -32,12 +56,16 @@ function matchCreator(handle, salesMap) {
 }
 
 function isConvertedStatus(status) {
-  const normalized = String(status || '').trim().toLowerCase()
-  return normalized === 'agenciado' || normalized === 'convite aceito'
+  return isAgenciadoStatus(status)
 }
 
 function isAgenciadoStatus(status) {
-  return String(status || '').trim().toLowerCase() === 'agenciado'
+  const normalized = String(status || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+  return normalized === 'agenciado' || normalized === 'convite aceito'
 }
 
 function readPhase(prop) {
@@ -57,6 +85,10 @@ function readPhase(prop) {
       || ''
   }
   return ''
+}
+
+function readCreatedTime(prop, fallback) {
+  return prop?.created_time || fallback
 }
 
 function commissionForGmvRange(range) {
@@ -84,25 +116,32 @@ async function fetchAllLeads() {
 
   return results.map((page) => {
     const p = page.properties
-    const status = readPhase(p['Fase de agenciamento']) || readPhase(p['Qual a fase do agenciamento'])
-    const gmvRange = readPhase(p['Faixa de GMV (Faturamento Mensal no Tiktok Shop)'])
+    const status = readPhase(p['Fase de agenciamento'])
+    const gmvRange = readPhase(
+      p['Faixa de GMV (Faturamento Mensal no TikTok Shop)']
+      || p['Faixa de GMV (Faturamento Mensal no Tiktok Shop)']
+    )
+    const created = readCreatedTime(p['Data'], page.created_time)
     return {
       id: page.id,
       nome: p['Nome Completo']?.title?.[0]?.plain_text ?? '',
-      handle: (p['@ TikTok']?.rich_text?.[0]?.plain_text ?? '').replace(/^@/,'').trim(),
+      handle: formatTikTokHandle(p['@ TikTok']?.rich_text?.[0]?.plain_text ?? ''),
       utm: p['UTM_Source']?.rich_text?.[0]?.plain_text ?? '',
       status,
       gmvRange,
       generatedCommission: commissionForGmvRange(gmvRange),
-      created: page.created_time,
+      created,
+      createdDate: BR_DATE_FORMATTER.format(new Date(created)),
     }
   })
 }
 
 async function fetchXlsx(sinceDate, untilDate) {
+  if (!GDRIVE_KEY) return { weeklySalesMap: {}, weeklyAmplify: {} }
+
   try {
     const listUrl = `https://www.googleapis.com/drive/v3/files?q='${FOLDER_ID}'+in+parents+and+mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'&orderBy=modifiedTime+desc&pageSize=50&fields=files(id,name,modifiedTime)&key=${GDRIVE_KEY}`
-    const listRes = await fetch(listUrl)
+    const listRes = await fetch(listUrl, { signal: AbortSignal.timeout(8000) })
     if (!listRes.ok) return { weeklySalesMap: {}, weeklyAmplify: {} }
     const { files } = await listRes.json()
     if (!files?.length) return { weeklySalesMap: {}, weeklyAmplify: {} }
@@ -115,7 +154,7 @@ async function fetchXlsx(sinceDate, untilDate) {
 
     const processed = await Promise.all(relevant.map(async file => {
       try {
-        const dlRes = await fetch(`https://www.googleapis.com/drive/v3/files/${file.id}?alt=media&key=${GDRIVE_KEY}`)
+        const dlRes = await fetch(`https://www.googleapis.com/drive/v3/files/${file.id}?alt=media&key=${GDRIVE_KEY}`, { signal: AbortSignal.timeout(8000) })
         if (!dlRes.ok) return null
         const wb = XLSX.read(await dlRes.arrayBuffer(), { type: 'array' })
         const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 })
@@ -152,18 +191,121 @@ async function fetchXlsx(sinceDate, untilDate) {
 }
 
 let cache = null, cacheAt = 0
-const CACHE_TTL = 5 * 60 * 1000
+const CACHE_TTL = 4 * 60 * 60 * 1000
+const CACHE_FILE = '/tmp/amplify-hub-indiqueeganhe-full-cache.json'
+const SNAPSHOT_FILE = `${process.cwd()}/data/indiqueeganhe-full-snapshot.json`
+
+async function readCacheFile() {
+  try {
+    const saved = JSON.parse(await readFile(CACHE_FILE, 'utf8'))
+    if (saved?.cacheAt && saved?.data && Date.now() - saved.cacheAt < CACHE_TTL) return saved
+  } catch {}
+  return null
+}
+
+async function readBundledSnapshot() {
+  try {
+    const saved = JSON.parse(await readFile(SNAPSHOT_FILE, 'utf8'))
+    return saved?.data || saved
+  } catch {}
+  return null
+}
+
+async function writeCacheFile(data) {
+  try {
+    await writeFile(CACHE_FILE, JSON.stringify({ cacheAt: Date.now(), data }), 'utf8')
+  } catch {}
+}
+
+function filterCachedData(data, startDate, endDate) {
+  const leads = (data.leads || []).filter((lead) => {
+    const d = lead.createdDate || lead.created?.slice(0, 10)
+    return d && (!startDate || d >= startDate) && (!endDate || d <= endDate)
+  })
+  const totalAgenciados = leads.filter((lead) => isAgenciadoStatus(lead.status)).length
+  const totalGmv = leads.reduce((sum, lead) => sum + Number(lead.gmv || 0), 0)
+  const totalCom = leads.reduce((sum, lead) => sum + Number(lead.comissao || 0), 0)
+  const totalGeneratedCommission = leads.reduce((sum, lead) => {
+    return isAgenciadoStatus(lead.status) ? sum + Number(lead.generatedCommission || 0) : sum
+  }, 0)
+  const leadsWithGmv = leads.filter((lead) => Number(lead.gmv || 0) > 0)
+  const byStatus = leads.reduce((acc, lead) => {
+    const status = lead.status || 'Sem status'
+    acc[status] = (acc[status] ?? 0) + 1
+    return acc
+  }, {})
+  const byDay = leads.reduce((acc, lead) => {
+    const d = lead.createdDate || lead.created?.slice(0, 10)
+    if (!d) return acc
+    if (!acc[d]) acc[d] = { n: 0, converted: 0 }
+    acc[d].n += 1
+    if (isConvertedStatus(lead.status)) acc[d].converted += 1
+    return acc
+  }, {})
+  const weeklyData = (data.weeklyData || []).filter((point) => {
+    return (!startDate || point.date >= startDate) && (!endDate || point.date <= endDate)
+  })
+  const weeklyDataByCreator = Object.fromEntries(
+    Object.entries(data.weeklyDataByCreator || {}).map(([creator, points]) => [
+      creator,
+      points.filter((point) => (!startDate || point.date >= startDate) && (!endDate || point.date <= endDate)),
+    ])
+  )
+
+  return {
+    ...data,
+    summary: {
+      ...(data.summary || {}),
+      total: leads.length,
+      totalAgenciados,
+      conversionRate: leads.length ? Math.round(totalAgenciados / leads.length * 100) : 0,
+      totalGeneratedCommission,
+      leadsWithGmv: leadsWithGmv.length,
+      matchRate: leads.length ? Math.round(leadsWithGmv.length / leads.length * 100) : 0,
+      totalGmv,
+      totalCom,
+      indiqueEarn: totalCom * 0.10 * 0.20,
+      byStatus,
+    },
+    leads,
+    byDay: Object.entries(byDay).sort(([a], [b]) => a.localeCompare(b)).map(([date, values]) => ({ date, ...values })),
+    weeklyData,
+    weeklyDataByCreator,
+    fromCache: true,
+  }
+}
 
 export async function GET(req) {
   try {
     const startDate = req.nextUrl.searchParams.get('startDate') ?? ''
     const endDate = req.nextUrl.searchParams.get('endDate') ?? new Date().toISOString().slice(0, 10)
     const hasDateFilter = Boolean(startDate || req.nextUrl.searchParams.get('endDate'))
+    const forceLive = req.nextUrl.searchParams.get('live') === '1'
 
-    if (cache && !hasDateFilter && Date.now() - cacheAt < CACHE_TTL) return NextResponse.json(cache)
+    if (!forceLive) {
+      const snapshot = await readBundledSnapshot()
+      if (snapshot) {
+        const data = hasDateFilter ? filterCachedData(snapshot, startDate, endDate) : snapshot
+        return NextResponse.json({ ...data, source: 'bundled-snapshot' })
+      }
+    }
+
+    const saved = await readCacheFile()
+    if (hasDateFilter && saved) {
+      return NextResponse.json(filterCachedData(saved.data, startDate, endDate))
+    }
+
+    if (!hasDateFilter) {
+      if (cache && Date.now() - cacheAt < CACHE_TTL) return NextResponse.json(cache)
+      if (saved) {
+        cache = saved.data
+        cacheAt = saved.cacheAt
+        return NextResponse.json(saved.data)
+      }
+    }
 
     const leads = await fetchAllLeads()
-    const dates = leads.map(l => l.created?.slice(0, 10)).filter(Boolean).sort()
+    const dates = leads.map(l => l.createdDate || l.created?.slice(0, 10)).filter(Boolean).sort()
     const firstDate = startDate || dates[0] || '2024-01-01'
     const { weeklySalesMap } = await fetchXlsx(firstDate, endDate)
 
@@ -179,7 +321,7 @@ export async function GET(req) {
       return { ...l, gmv: sale?.gmv ?? 0, comissao: sale?.comissao ?? 0 }
     })
     const periodLeads = enriched.filter(l => {
-      const d = l.created?.slice(0, 10)
+      const d = l.createdDate || l.created?.slice(0, 10)
       return d && d >= firstDate && d <= endDate
     })
     const leadsWithGmv = periodLeads.filter(l => l.gmv > 0)
@@ -199,7 +341,7 @@ export async function GET(req) {
 
     const byDay = {}
     periodLeads.forEach(l => {
-      const d = l.created?.slice(0, 10)
+      const d = l.createdDate || l.created?.slice(0, 10)
       if (d) {
         if (!byDay[d]) byDay[d] = { n: 0, converted: 0 }
         byDay[d].n += 1
@@ -230,7 +372,11 @@ export async function GET(req) {
       weeklyData,
       weeklyDataByCreator,
     }
-    if (!hasDateFilter) { cache = result; cacheAt = Date.now() }
+    if (!hasDateFilter) {
+      cache = result
+      cacheAt = Date.now()
+      await writeCacheFile(result)
+    }
     return NextResponse.json(result)
   } catch (e) {
     return NextResponse.json({ error: e.message }, { status: 500 })

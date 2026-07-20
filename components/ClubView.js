@@ -12,6 +12,7 @@ const fmtBRL  = (n) => "R$ " + Number(n || 0).toLocaleString("pt-BR", { minimumF
 const fmtBRLd = (n) => "R$ " + Number(n || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtWeek = (iso) => { const d = new Date(iso + "T00:00:00"); return `${d.getDate()}/${d.getMonth() + 1}`; };
 const fmtDate = (iso) => new Date(iso + "T00:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
+const fmtFullDate = (iso) => iso ? new Date(iso + "T00:00:00").toLocaleDateString("pt-BR") : "sem data";
 const toLocal = (d) => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
 
 const CAT_CONFIG = {
@@ -28,6 +29,12 @@ const VIRADA_CLUB_URL = "https://amplify-club-retencao.netlify.app/";
 const VIRADA_CATEGORIES = ["Start", "Silver", "Gold", "Diamond", "Safira", "Royal"];
 
 const fmtPct = (n) => `${(Number(n || 0) * 100).toFixed(1)}%`;
+const amplifyTake = (partnerCommission) => Number(partnerCommission || 0) * 0.10;
+const amplifyRevenue = (item) => (
+  typeof item?.amplify_commission === "number"
+    ? item.amplify_commission
+    : amplifyTake(item?.partner_commission)
+);
 
 function AccessCard({ href, title, description, tag, external = false, accent = "#25F4EE" }) {
   const className = "group rounded-lg border border-white/10 bg-[#10141E] p-4 hover:bg-white/[0.04] transition-colors";
@@ -82,7 +89,7 @@ function ViradaDashboard({ data, loading, error }) {
   const categories = VIRADA_CATEGORIES
     .map((name) => data.categories?.[name])
     .filter(Boolean);
-  const maxRevenue = Math.max(...categories.map((c) => c.amplify_commission || c.partner_commission || 0), 1);
+  const maxRevenue = Math.max(...categories.map((c) => amplifyRevenue(c)), 1);
   const expiring = (data.high_value_expiring || []).slice(0, 8);
 
   return (
@@ -111,7 +118,7 @@ function ViradaDashboard({ data, loading, error }) {
           {[
             { label: "Creators ativos", value: Number(data.totals.creators || 0).toLocaleString("pt-BR"), color: "#fff" },
             { label: "GMV total", value: fmtBRLd(data.totals.gmv), color: "#10b981" },
-            { label: "Comissão Amplify", value: fmtBRLd(data.totals.amplify_commission || data.totals.partner_commission), color: "#25F4EE" },
+            { label: "Receita Amplify", value: fmtBRLd(amplifyRevenue(data.totals)), color: "#25F4EE" },
             { label: "Contratos 90d", value: String((data.high_value_expiring || []).length), color: "#f59e0b" },
           ].map((k) => (
             <div key={k.label} className="rounded-lg border border-white/10 bg-[#0A0B12] p-4">
@@ -124,12 +131,12 @@ function ViradaDashboard({ data, loading, error }) {
         <div className="grid grid-cols-1 xl:grid-cols-[.85fr_1.15fr] gap-4">
           <div className="rounded-lg border border-white/10 bg-[#0A0B12] p-4">
             <div className="flex items-center justify-between gap-3 mb-4">
-              <h3 className="text-sm font-extrabold">Comissão por categoria</h3>
+              <h3 className="text-sm font-extrabold">Receita Amplify por categoria</h3>
               <span className="text-[10px] font-mono uppercase tracking-widest text-white/30">P&L</span>
             </div>
             <div className="space-y-3">
               {categories.map((c) => {
-                const revenue = c.amplify_commission || c.partner_commission || 0;
+                const revenue = amplifyRevenue(c);
                 const pct = Math.max(4, (revenue / maxRevenue) * 100);
                 return (
                   <div key={c.name}>
@@ -155,7 +162,7 @@ function ViradaDashboard({ data, loading, error }) {
               <table className="w-full min-w-[680px]">
                 <thead className="bg-white/[0.02]">
                   <tr>
-                    {["Categoria", "Creators", "GMV", "Comissão", "Take rate"].map((h) => (
+                    {["Categoria", "Creators", "GMV", "Receita Amplify", "Take rate"].map((h) => (
                       <th key={h} className="px-4 py-3 text-left text-[10px] font-mono uppercase tracking-wider text-white/40">{h}</th>
                     ))}
                   </tr>
@@ -166,7 +173,7 @@ function ViradaDashboard({ data, loading, error }) {
                       <td className="px-4 py-3 text-sm font-bold text-white">{c.emoji} {c.name}</td>
                       <td className="px-4 py-3 text-sm text-white/70">{Number(c.creators?.length || 0).toLocaleString("pt-BR")}</td>
                       <td className="px-4 py-3 text-sm font-mono text-emerald-300">{fmtBRL(c.gmv)}</td>
-                      <td className="px-4 py-3 text-sm font-mono text-cyan-300">{fmtBRL(c.amplify_commission || c.partner_commission)}</td>
+                      <td className="px-4 py-3 text-sm font-mono text-cyan-300">{fmtBRL(amplifyRevenue(c))}</td>
                       <td className="px-4 py-3 text-sm font-mono text-white/60">{fmtPct(c.avg_take_rate)}</td>
                     </tr>
                   ))}
@@ -185,7 +192,7 @@ function ViradaDashboard({ data, loading, error }) {
             <table className="w-full min-w-[760px]">
               <thead className="bg-white/[0.02]">
                 <tr>
-                  {["Creator", "Categoria", "GMV", "Comissão", "Fim", "Dias"].map((h) => (
+                  {["Creator", "Categoria", "GMV", "Receita Amplify", "Fim", "Dias"].map((h) => (
                     <th key={h} className="px-4 py-3 text-left text-[10px] font-mono uppercase tracking-wider text-white/40">{h}</th>
                   ))}
                 </tr>
@@ -196,7 +203,7 @@ function ViradaDashboard({ data, loading, error }) {
                     <td className="px-4 py-3 text-sm font-bold text-white">@{c.arroba}</td>
                     <td className="px-4 py-3 text-sm text-white/60">{c.category}</td>
                     <td className="px-4 py-3 text-sm font-mono text-emerald-300">{fmtBRL(c.gmv)}</td>
-                    <td className="px-4 py-3 text-sm font-mono text-cyan-300">{fmtBRL(c.amplify_commission || c.partner_commission)}</td>
+                    <td className="px-4 py-3 text-sm font-mono text-cyan-300">{fmtBRL(amplifyRevenue(c))}</td>
                     <td className="px-4 py-3 text-sm font-mono text-white/60">{c.contract_end || "-"}</td>
                     <td className={`px-4 py-3 text-sm font-bold ${c.days_left <= 15 ? "text-red-300" : c.days_left <= 45 ? "text-amber-300" : "text-white/60"}`}>{c.days_left}</td>
                   </tr>
@@ -225,32 +232,52 @@ export default function ClubView() {
   const [viradaError, setViradaError] = useState("");
 
   useEffect(() => {
-    setLoading(true);
-    const params = new URLSearchParams();
-    if (applied.start) params.set("startDate", applied.start);
-    if (applied.end)   params.set("endDate",   applied.end);
-    fetch(`/api/club-full?${params}`)
-      .then(r => r.json())
-      .then(d => { if (d.error) setError(d.error); else setData(d); setLoading(false); })
-      .catch(() => { setError("Erro ao carregar."); setLoading(false); });
+    async function loadClub() {
+      setLoading(true);
+      const params = new URLSearchParams();
+      if (applied.start) params.set("startDate", applied.start);
+      if (applied.end)   params.set("endDate",   applied.end);
+      try {
+        const r = await fetch(`/api/club-full?${params}`);
+        const d = await r.json();
+        if (d.error) setError(d.error);
+        else setData(d);
+      } catch {
+        setError("Erro ao carregar.");
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadClub();
   }, [applied]);
 
   useEffect(() => {
-    setViradaLoading(true);
-    fetch("/api/club-virada")
-      .then(r => r.json())
-      .then(d => {
+    async function loadVirada() {
+      setViradaLoading(true);
+      try {
+        const r = await fetch("/api/club-virada");
+        const d = await r.json();
         if (d.error) setViradaError(d.error);
         else setViradaData(d);
-        setViradaLoading(false);
-      })
-      .catch(() => {
+      } catch {
         setViradaError("Erro ao carregar dashboard da virada.");
+      } finally {
         setViradaLoading(false);
-      });
+      }
+    }
+    loadVirada();
   }, []);
 
   const { summary: s, creators = [], weeklyAmplifyData = [] } = data || {};
+  const coverage = data?.dataCoverage;
+  const coverageWarnings = coverage?.warnings || [];
+  const coverageFiles = coverage?.matchedFiles || [];
+  const requestedLabel = coverage?.requested
+    ? `${fmtFullDate(coverage.requested.startDate)} → ${fmtFullDate(coverage.requested.endDate)}`
+    : "";
+  const effectiveLabel = coverage?.effective?.startDate
+    ? `${fmtFullDate(coverage.effective.startDate)} → ${fmtFullDate(coverage.effective.endDate)}`
+    : "";
 
   const filteredCreators = creators.filter(c =>
     c.nome.toLowerCase().includes(search.toLowerCase()) ||
@@ -363,6 +390,9 @@ export default function ClubView() {
             <div>
               <p className="text-[10px] font-mono uppercase tracking-widest text-white/40 mb-1">Performance do Club</p>
               <h2 className="text-lg font-extrabold tracking-tight">Base atual e evolução semanal</h2>
+              <p className="text-xs text-white/35 mt-1 max-w-2xl">
+                O filtro usa planilhas semanais do Drive. Datas específicas podem ser aproximadas pela semana que cobre o período.
+              </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
@@ -380,6 +410,22 @@ export default function ClubView() {
               )}
             </div>
           </div>
+          {coverage && (
+            <div className={`mt-4 rounded-lg border px-3 py-2 text-xs ${
+              coverageWarnings.length
+                ? "border-amber-400/30 bg-amber-400/10 text-amber-100"
+                : "border-emerald-400/20 bg-emerald-400/10 text-emerald-100"
+            }`}>
+              <div className="font-bold">
+                Cobertura do filtro: {requestedLabel}
+                {effectiveLabel && effectiveLabel !== requestedLabel ? ` · usado: ${effectiveLabel}` : ""}
+              </div>
+              <div className="mt-1 text-white/60">
+                {coverageWarnings[0] || "Periodo coberto pelo arquivo disponivel."}
+                {coverageFiles.length > 0 ? ` Arquivos usados: ${coverageFiles.length}.` : ""}
+              </div>
+            </div>
+          )}
         </section>
 
         {error && <div className="bg-red-900/30 border border-red-500/40 rounded-2xl p-4 text-red-300 text-sm">⚠️ {error}</div>}

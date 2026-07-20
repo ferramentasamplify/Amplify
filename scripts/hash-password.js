@@ -16,7 +16,11 @@ if (!password) {
   process.exit(1);
 }
 
-import("bcryptjs").then(({ hash }) => {
-  const out = hash(password, 10);
-  console.log(out);
-});
+import("bcryptjs")
+  .then(({ hashSync }) => {
+    console.log(hashSync(password, 10));
+  })
+  .catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
