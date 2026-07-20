@@ -19,13 +19,6 @@ const fmtDate = (dateString) => {
   if (!year || !month || !day) return dateString;
   return `${day}/${month}/${year}`;
 };
-const contractLabel = (days) => {
-  if (days === null || days === undefined) return "sem data";
-  if (days < 0) return `venceu ha ${Math.abs(days)}d`;
-  if (days === 0) return "vence hoje";
-  if (days === 1) return "vence amanha";
-  return `vence em ${days}d`;
-};
 
 const CAT_CONFIG = {
   Diamond: { color: "#2563EB", badge: "💎" },
@@ -99,7 +92,6 @@ export default function AmCarteiraView({ slug }) {
   const am = data?.am;
   const creators = data?.creators || [];
   const summary = data?.summary || {};
-  const contratosVencendo = summary.contratosVencendoLista || [];
   const freshness = data?.dataFreshness || {};
   const requestedPeriod = freshness.requestedPeriod || applied;
   const effectiveCoverage = freshness.effectiveCoverage || {};
@@ -152,7 +144,7 @@ export default function AmCarteiraView({ slug }) {
               Olá, <span style={{ color: am?.accentColor }}>{am?.shortName}</span> 👋
             </h1>
             <p className="text-sm text-white/50 mt-1">
-              Sua carteira atualizada do Amplify Club — GMV, nicho, contratos e link direto pro Notion.
+              Sua carteira atualizada do Amplify Club — GMV e comissão vindos do Partner Center.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -217,7 +209,7 @@ export default function AmCarteiraView({ slug }) {
         )}
 
         {/* KPIs */}
-        <div className="grid grid-cols-2 lg:grid-cols-7 gap-3">
+        <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
           {[
             { label: "Creators", value: summary.total || 0, color: "#a855f7" },
             { label: "Ativos", value: summary.ativos || 0, color: "#10b981" },
@@ -225,7 +217,6 @@ export default function AmCarteiraView({ slug }) {
             { label: "Comissão Creator", value: fmtBRL(summary.comissaoTotal), color: "#D97706" },
             { label: "Receita Amplify", value: fmtBRL(summary.receitaTotal), color: "#25F4EE" },
             { label: "Comissão média", value: fmtPct(summary.comissaoMediaCreator), color: "#f59e0b" },
-            { label: "Contratos 30d", value: summary.contratosVencendo || 0, color: "#ef4444" },
           ].map((k) => (
             <div key={k.label} className="bg-[#14161F] border border-white/10 rounded-2xl p-5">
               <div className="text-[10px] font-mono uppercase tracking-widest text-white/40 mb-1">
@@ -259,33 +250,6 @@ export default function AmCarteiraView({ slug }) {
             </div>
           </div>
         </div>
-
-        {contratosVencendo.length > 0 && (
-          <div className="bg-[#14161F] border border-red-500/20 rounded-2xl p-4">
-            <div className="flex items-center justify-between gap-3 mb-3">
-              <div>
-                <div className="text-[10px] font-mono uppercase tracking-widest text-red-300/70">
-                  Contratos próximos
-                </div>
-                <div className="text-sm text-white/50">
-                  {contratosVencendo.length} creator{contratosVencendo.length > 1 ? "s" : ""} com vencimento em até 30 dias
-                </div>
-              </div>
-            </div>
-            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
-              {contratosVencendo.slice(0, 6).map((c) => (
-                <div key={c.id || c.handle} className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2">
-                  <div className="font-bold text-sm text-white truncate">{c.nome || c.handle}</div>
-                  <div className="flex items-center justify-between gap-2 text-[11px] text-white/45">
-                    <span>@{c.handle}</span>
-                    <span className="font-mono text-red-300">{contractLabel(c.daysRemaining)}</span>
-                  </div>
-                  <div className="text-[10px] text-white/35 font-mono mt-1">{fmtDate(c.contractEnd)}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
 
         {/* Categorias */}
         {summary.byCategoria && Object.keys(summary.byCategoria).length > 0 && (
@@ -348,7 +312,6 @@ export default function AmCarteiraView({ slug }) {
                   <th className="text-right px-4 py-3">Comissão Creator</th>
                   <th className="text-right px-4 py-3">Média</th>
                   <th className="text-right px-4 py-3">Receita Amplify</th>
-                  <th className="text-left px-4 py-3">Contrato</th>
                   <th className="text-left px-4 py-3">Insight</th>
                   <th className="text-left px-4 py-3">Última att</th>
                   <th className="text-right px-4 py-3">Ações</th>
@@ -357,7 +320,7 @@ export default function AmCarteiraView({ slug }) {
               <tbody>
                 {filtered.length === 0 ? (
                   <tr>
-                    <td colSpan={11} className="text-center py-10 text-white/40 text-xs">
+                    <td colSpan={10} className="text-center py-10 text-white/40 text-xs">
                       {creators.length === 0
                         ? "Sua carteira tá vazia. Peça pro Gabriel preencher lib/carteiras.js."
                         : "Nenhum creator com esses filtros."}
@@ -372,9 +335,9 @@ export default function AmCarteiraView({ slug }) {
                           <div className="font-bold text-white">{c.nome || c.handle}</div>
                           <div className="flex items-center gap-2 text-[10px] text-white/40">
                             <span>@{c.handle}</span>
-                            {c.source === "demo" && (
+                            {c.source === "partner_center_only" && (
                               <span className="text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded px-1">
-                                demo
+                                sem cadastro
                               </span>
                             )}
                           </div>
@@ -401,16 +364,6 @@ export default function AmCarteiraView({ slug }) {
                         </td>
                         <td className="px-4 py-3 text-right font-mono tabular-nums" style={{ color: "#25F4EE" }}>
                           {fmtBRL(c.amplifyRevenue)}
-                        </td>
-                        <td className="px-4 py-3 text-xs text-white/50 font-mono">
-                          {c.contractEnd ? (
-                            <span className={c.contractDaysRemaining <= 30 ? "text-red-300" : ""}>
-                              {fmtDate(c.contractEnd)}
-                              <span className="block text-[10px] text-white/35">
-                                {contractLabel(c.contractDaysRemaining)}
-                              </span>
-                            </span>
-                          ) : "—"}
                         </td>
                         <td className="px-4 py-3 text-xs text-white/60 max-w-[260px]">
                           {c.insight || "Sem historico suficiente."}

@@ -18,13 +18,6 @@ const fmtDate = (dateString) => {
   if (!year || !month || !day) return dateString;
   return `${day}/${month}/${year}`;
 };
-const contractLabel = (days) => {
-  if (days === null || days === undefined) return "sem data";
-  if (days < 0) return `venceu ha ${Math.abs(days)}d`;
-  if (days === 0) return "vence hoje";
-  if (days === 1) return "vence amanha";
-  return `vence em ${days}d`;
-};
 
 /** Cavalinho animado — foto circular com bobbing idle e posição X animada */
 function Horse({ am, trackPositionPct, gmvTotal, position, isLeader }) {
@@ -187,8 +180,6 @@ export default function AmCentralView() {
 
   const ranking = data?.ranking || [];
   const totalGmv = ranking.reduce((acc, r) => acc + r.gmvTotal, 0);
-  const totalContratos90 = ranking.reduce((acc, r) => acc + (r.contratos90 || 0), 0);
-  const totalContratos30 = ranking.reduce((acc, r) => acc + (r.contratos30 || 0), 0);
   const freshness = data?.dataFreshness || {};
   const requestedPeriod = freshness.requestedPeriod || applied;
   const effectiveCoverage = freshness.effectiveCoverage || {};
@@ -340,7 +331,6 @@ export default function AmCentralView() {
               <div className="text-right text-xs text-white/40">
                 <div>Total combinado: <span className="font-mono font-bold text-white">{fmtBRL(totalGmv)}</span></div>
                 <div>Régua = GMV do mês passado por carteira</div>
-                <div>Contratos 90d: <span className="font-mono font-bold text-amber-200">{totalContratos90}</span> · 30d: <span className="font-mono font-bold text-red-300">{totalContratos30}</span></div>
               </div>
             </div>
 
@@ -382,57 +372,6 @@ export default function AmCentralView() {
                       <span className="text-emerald-300 font-bold">
                         +{fmtPct(r.progressVsPreviousPct - 100)} acima da base
                       </span>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Contratos a vencer */}
-          <div className="bg-[#14161F] border border-white/10 rounded-2xl p-5">
-            <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2 mb-4">
-              <div>
-                <p className="text-[10px] font-mono uppercase tracking-widest text-amber-300/70">
-                  Contratos a vencer
-                </p>
-                <h2 className="text-lg font-extrabold">Creators que precisam de ação</h2>
-              </div>
-              <p className="text-xs text-white/40">
-                Vencidos ou até 90 dias; 30 dias entram como urgência.
-              </p>
-            </div>
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-              {ranking.map((r) => (
-                <div key={r.am.slug} className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
-                  <div className="flex items-center justify-between gap-3 mb-2">
-                    <div className="font-bold" style={{ color: r.am.accentColor }}>
-                      {r.am.shortName}
-                    </div>
-                    <div className="text-[11px] text-white/45">
-                      <span className="text-red-300 font-bold">{r.contratos30 || 0}</span> em 30d · <span className="text-amber-200 font-bold">{r.contratos90 || 0}</span> em 90d
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    {(r.contratosVencendo || []).slice(0, 4).map((c) => (
-                      <div key={`${r.am.slug}-${c.handle}`} className="flex items-center justify-between gap-2 text-xs">
-                        <div className="min-w-0">
-                          {c.notionUrl ? (
-                            <a href={c.notionUrl} target="_blank" rel="noreferrer" className="font-semibold text-white hover:text-[#25F4EE] truncate block">
-                              @{c.handle}
-                            </a>
-                          ) : (
-                            <span className="font-semibold text-white truncate block">@{c.handle}</span>
-                          )}
-                          <span className="text-[10px] text-white/35">{fmtDate(c.contractEnd)}</span>
-                        </div>
-                        <span className={`font-mono flex-shrink-0 ${c.daysRemaining <= 30 ? "text-red-300" : "text-amber-200"}`}>
-                          {contractLabel(c.daysRemaining)}
-                        </span>
-                      </div>
-                    ))}
-                    {(r.contratosVencendo || []).length === 0 && (
-                      <div className="text-xs text-white/35">Sem vencimentos em 90 dias.</div>
                     )}
                   </div>
                 </div>
@@ -505,12 +444,6 @@ export default function AmCentralView() {
                       {r.previousGmvTotal > 0 ? fmtPct(r.progressVsPreviousPct) : "—"}
                     </div>
                   </div>
-                  <div className="bg-white/[0.03] rounded-lg p-2 text-center col-span-3">
-                    <div className="text-[9px] text-white/40 uppercase">Contratos</div>
-                    <div className="text-xs font-bold text-white">
-                      <span className="text-red-300">{r.contratos30 || 0}</span> em 30d · <span className="text-amber-200">{r.contratos90 || 0}</span> em 90d
-                    </div>
-                  </div>
                 </div>
 
                 {r.top5.length > 0 && (
@@ -531,9 +464,9 @@ export default function AmCentralView() {
                               <span className="font-bold truncate">{c.nome}</span>
                             )}
                             <span className="text-white/40 text-[10px]">@{c.handle}</span>
-                            {c.source === "demo" && (
+                            {c.source === "partner_center_only" && (
                               <span className="text-[9px] text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded px-1">
-                                demo
+                                sem cadastro
                               </span>
                             )}
                           </div>
@@ -562,10 +495,11 @@ export default function AmCentralView() {
 
           <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 text-amber-100 text-sm">
             <div className="font-bold mb-1">Fontes de dados em atenção</div>
-            <div className="space-y-1 text-xs text-amber-100/80">
-              <div>• GMV e comissão devem vir do snapshot diário TikTok Shop/Partner Center; a central não deve abrir o Partner Center ao vivo a cada refresh.</div>
-              <div>• Notion entra como cadastro/contexto: nome, categoria, contrato e link do perfil.</div>
-              <div>• Drive/planilhas não são fonte final de granularidade quando o snapshot TikTok Shop estiver disponível.</div>
+              <div className="space-y-1 text-xs text-amber-100/80">
+                <div>• GMV e comissão devem vir do snapshot diário TikTok Shop/Partner Center; a central não deve abrir o Partner Center ao vivo a cada refresh.</div>
+                <div>• Notion entra só como cadastro auxiliar: nome, categoria e link do perfil.</div>
+                <div>• Vencimento de contrato não aparece aqui enquanto o Partner Center/snapshot não trouxer esse campo.</div>
+                <div>• Drive/planilhas não são fonte final de granularidade quando o snapshot TikTok Shop estiver disponível.</div>
               {(data?.warnings || []).map((w) => (
                 <div key={w}>• {w}</div>
               ))}

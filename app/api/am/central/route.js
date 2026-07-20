@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { readSession } from "@/lib/am-auth";
 import { RACE_PARTICIPANTS, AM_BY_SLUG, publicAmData } from "@/lib/am-config";
 import { CARTEIRAS } from "@/lib/carteiras";
-import { demoCreatorsForHandles, demoInsight } from "@/lib/am-demo-data";
 import { queryNotionDatabase } from "@/lib/notion-query";
 import { aggregateTikTokSnapshots, cleanHandle, defaultSnapshotPeriod } from "@/lib/tiktok-shop-snapshots";
 
@@ -27,13 +26,13 @@ const addMonthsISO = (dateString, months) => {
   d.setUTCMonth(d.getUTCMonth() + months);
   return d.toISOString().slice(0, 10);
 };
-const daysUntil = (dateString) => {
-  if (!dateString) return null;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const target = new Date(`${dateString}T00:00:00`);
-  if (Number.isNaN(target.getTime())) return null;
-  return Math.ceil((target.getTime() - today.getTime()) / 86400000);
+const insightFromSales = (currentGmv, previousGmv) => {
+  if (!previousGmv) return "Sem base anterior no snapshot Partner Center.";
+  const delta = currentGmv - previousGmv;
+  const pct = (delta / previousGmv) * 100;
+  if (pct >= 12) return `GMV subindo ${pct.toFixed(1)}% vs. periodo anterior.`;
+  if (pct <= -8) return `GMV caindo ${Math.abs(pct).toFixed(1)}% vs. periodo anterior.`;
+  return `GMV estavel (${pct.toFixed(1)}% vs. periodo anterior).`;
 };
 
 /**
@@ -72,7 +71,10 @@ export async function GET(req) {
     const sourceStatus = {
       notion: { ok: true, message: "Notion carregado." },
       sales: { ok: true, message: "Snapshot de vendas carregado." },
-      demo: { used: false, message: "" },
+      operationalSource: {
+        ok: true,
+        message: "Metricas operacionais vêm exclusivamente do snapshot TikTok Shop/Partner Center.",
+      },
     };
     if (allCarteiraHandles.size > 0) try {
       for (const batch of chunk([...allCarteiraHandles], 20)) {
@@ -89,8 +91,7 @@ export async function GET(req) {
       }
     } catch (e) {
       sourceStatus.notion = { ok: false, message: `Notion indisponivel: ${e.message}` };
-      sourceStatus.demo.used = true;
-      console.warn("[central] Notion indisponivel; dados faltantes serao marcados como demo:", e.message);
+      console.warn("[central] Notion indisponivel; cadastro auxiliar ficara limitado:", e.message);
     }
 
     const creatorsByHandle = {};
@@ -113,11 +114,6 @@ export async function GET(req) {
           p["Nicho"]?.multi_select?.[0]?.name ??
           p["Categoria"]?.select?.name ??
           "A definir",
-        contractEnd:
-          p["Data de Expiração"]?.date?.start ??
-          p["Fim do contrato"]?.date?.start ??
-          p["Contrato vence em"]?.date?.start ??
-          null,
       };
     }
 
@@ -130,10 +126,8 @@ export async function GET(req) {
         to: previousTo,
         handles: allCarteiraHandles,
       });
-      if (salesSnapshot.warnings.length > 0) sourceStatus.demo.used = true;
     } catch (e) {
       sourceStatus.sales = { ok: false, message: `Snapshot TikTok Shop/GMV indisponivel: ${e.message}` };
-      sourceStatus.demo.used = true;
       console.error("[central] erro GMV:", e.message);
       salesSnapshot = aggregateTikTokSnapshots({ handles: allCarteiraHandles });
       previousSalesSnapshot = { byHandle: {}, coverage: null };
@@ -142,27 +136,30 @@ export async function GET(req) {
     // 4) agrega por AM
     const ranking = RACE_PARTICIPANTS.map((am) => {
       const handles = carteirasPorAm[am.slug] || [];
-      const demoByHandle = Object.fromEntries(demoCreatorsForHandles(handles).map((c) => [c.handle, c]));
       const detalhes = handles.map((h) => {
-        const demo = demoByHandle[h];
         const liveCreator = creatorsByHandle[h];
-        const c = liveCreator || demo || { id: null, nome: h, handle: h, categoria: "Start" };
+        const c = liveCreator || {
+          id: `partner-center-${h}`,
+          nome: h,
+          handle: h,
+          categoria: "Sem cadastro",
+          nicho: "A definir",
+          notionUrl: null,
+        };
         const s = salesSnapshot.byHandle[h] || { gmv: 0, comissao: 0 };
         const previousSale = previousSalesSnapshot.byHandle?.[h] || {};
-        const gmv = s.gmv || demo?.currentGmv || 0;
-        const comissao = s.comissao || demo?.comissao || 0;
-        const contractEnd = liveCreator?.contractEnd || null;
+        const gmv = s.gmv || 0;
+        const comissao = s.comissao || 0;
         return {
           ...c,
-          id: c.id || `demo-${h}`,
-          nicho: c.nicho || demo?.nicho || "A definir",
-          contractEnd,
-          notionUrl: c.notionUrl || demo?.notionUrl || null,
-          insight: c.insight || demoInsight(demo),
-          source: creatorsByHandle[h] ? "live" : "demo",
+          id: c.id || `partner-center-${h}`,
+          nicho: c.nicho || "A definir",
+          notionUrl: c.notionUrl || null,
+          insight: insightFromSales(gmv, previousSale.gmv || 0),
+          source: creatorsByHandle[h] ? "partner_center_with_notion_profile" : "partner_center_only",
           sourceLabel: creatorsByHandle[h]
-            ? "Notion"
-            : "Dado demonstrativo para apresentacao",
+            ? "Metricas do Partner Center + cadastro Notion"
+            : "Metricas do Partner Center; cadastro Notion ausente",
           gmv,
           previousGmv: previousSale.gmv || 0,
           comissao,
@@ -171,7 +168,6 @@ export async function GET(req) {
           videoGmv: s.videoGmv || 0,
           directGmv: s.directGmv || 0,
           amplifyRevenue: comissao * 0.1,
-          contractDaysRemaining: daysUntil(contractEnd),
         };
       }).sort((a, b) => b.gmv - a.gmv);
 
@@ -180,10 +176,6 @@ export async function GET(req) {
       const comTotal = detalhes.reduce((acc, c) => acc + c.comissao, 0);
       const recTotal = detalhes.reduce((acc, c) => acc + c.amplifyRevenue, 0);
       const ativos = detalhes.filter((c) => c.gmv > 0).length;
-      const expiring90 = detalhes
-        .filter((c) => c.contractDaysRemaining !== null && c.contractDaysRemaining <= 90)
-        .sort((a, b) => (a.contractDaysRemaining ?? 999) - (b.contractDaysRemaining ?? 999));
-      const expiring30 = expiring90.filter((c) => c.contractDaysRemaining <= 30);
 
       return {
         am: publicAmData(am),
@@ -193,17 +185,6 @@ export async function GET(req) {
         receitaTotal: recTotal,
         carteiraSize: handles.length,
         ativos,
-        contratos30: expiring30.length,
-        contratos90: expiring90.length,
-        contratosVencendo: expiring90.slice(0, 6).map((c) => ({
-          id: c.id,
-          nome: c.nome,
-          handle: c.handle,
-          contractEnd: c.contractEnd,
-          daysRemaining: c.contractDaysRemaining,
-          notionUrl: c.notionUrl || null,
-          gmv: c.gmv,
-        })),
         top5: detalhes.slice(0, 5),
       };
     }).sort((a, b) => b.gmvTotal - a.gmvTotal);
@@ -226,9 +207,6 @@ export async function GET(req) {
       receitaTotal: r.receitaTotal,
       carteiraSize: r.carteiraSize,
       ativos: r.ativos,
-      contratos30: r.contratos30,
-      contratos90: r.contratos90,
-      contratosVencendo: r.contratosVencendo,
       // posição visual limitada a 92%; acima de 100% vira badge, nao estoura a regua.
       trackPositionPct: clampTrackPct(
         r.previousGmvTotal > 0 ? (r.gmvTotal / r.previousGmvTotal) * 100 : 0,
@@ -238,14 +216,10 @@ export async function GET(req) {
       top5: r.top5,
     }));
 
-    sourceStatus.demo.message = sourceStatus.demo.used
-      ? "Parte dos dados exibidos esta rotulada como demonstrativa porque Notion ou snapshot TikTok Shop nao retornou fonte real."
-      : "Sem uso de dados demonstrativos.";
     const warnings = [
       !sourceStatus.notion.ok ? sourceStatus.notion.message : null,
       !sourceStatus.sales.ok ? sourceStatus.sales.message : null,
       ...(salesSnapshot?.warnings || []),
-      sourceStatus.demo.used ? sourceStatus.demo.message : null,
     ].filter(Boolean);
 
     return NextResponse.json({
@@ -262,7 +236,7 @@ export async function GET(req) {
         previousCoverage: previousSalesSnapshot.coverage,
         availablePeriods: salesSnapshot.availablePeriods,
         message:
-          "GMV e comissao vêm dos JSONs coletados no TikTok Shop Partner Center. A central aceita from/to e informa a cobertura efetiva usada.",
+          "GMV e comissao vêm dos JSONs coletados no TikTok Shop Partner Center. Notion e apenas cadastro auxiliar; vencimento de contrato nao e exibido porque o snapshot Partner Center atual nao traz esse campo.",
       },
       updatedAt: new Date().toISOString(),
     });
