@@ -258,6 +258,19 @@ export default function HubView() {
           <h2 className="text-xs font-mono uppercase tracking-widest text-white/40 pt-2">Aquisição</h2>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
 
+            {/* Funis Globais */}
+            <SectionCard
+              title="Funis Globais"
+              icon="⇢"
+              href="/hub/funis"
+              color="#9B8CFF"
+            >
+              <MiniKpi label="Visao" value="Global" color="#9B8CFF" sub="Creators + Marcas" />
+              <MiniKpi label="Canais" value="Todos" color="#37D7D0" sub="pago, organico, indicacao e outbound" />
+              <MiniKpi label="Leitura" value="Lead → conversao" color="#FF765F" sub="quadrados, setas e taxas por etapa" />
+              <MiniKpi label="Periodo" value="Filtravel" color="#F6B84B" sub="7 dias, 30 dias, Q3 ou datas livres" />
+            </SectionCard>
+
             {/* Growth Central */}
             <SectionCard
               title="Growth Central"
@@ -409,6 +422,7 @@ export default function HubView() {
               { href: "/metricas",           label: "Métricas",     icon: "🎯" },
               { href: "/custos",             label: "Custos",       icon: "💰" },
               { href: "/meta",               label: "Meta Ads",     icon: "📣" },
+              { href: "/hub/funis",          label: "Funis Globais", icon: "⇢" },
               { href: "/hub/growth",         label: "Growth Central", icon: "🧭" },
               { href: "/superafiliado",      label: "Super Afiliado", icon: "🤝" },
               { href: "/indiqueeganhe/login?next=/indiqueeganhe", label: "Indique e Ganhe", icon: "🎁" },

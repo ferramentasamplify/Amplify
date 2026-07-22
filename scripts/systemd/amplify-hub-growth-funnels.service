@@ -1,0 +1,8 @@
+[Unit]
+Description=Refresh Amplify Hub global Growth funnels
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/root/.openclaw/workspaces/retencao-gabriel/amplify-hub/scripts/refresh-growth-funnels.sh

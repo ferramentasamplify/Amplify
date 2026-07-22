@@ -1,0 +1,217 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+
+const fmt = (value) => value == null ? "—" : Number(value).toLocaleString("pt-BR");
+const fmtPct = (value) => value == null ? "—" : `${Number(value).toFixed(value >= 10 ? 0 : 1).replace(".", ",")}%`;
+const iso = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+const shift = (days) => { const date = new Date(); date.setDate(date.getDate() + days); return iso(date); };
+
+const TONES = {
+  violet: "#9B8CFF", pink: "#FF6FAE", cyan: "#37D7D0", amber: "#F6B84B",
+  blue: "#5A8CFF", coral: "#FF765F", green: "#47D7A0", slate: "#8B93A7",
+};
+
+function Arrow({ rate, muted = false }) {
+  return (
+    <div className={`flow-arrow ${muted ? "muted" : ""}`} aria-label={rate == null ? "Conversão indisponível" : `${fmtPct(rate)} de conversão`}>
+      <span>{rate == null ? "—" : fmtPct(rate)}</span>
+      <svg viewBox="0 0 58 12" aria-hidden="true"><path d="M1 6h51M47 1l6 5-6 5" /></svg>
+    </div>
+  );
+}
+
+function StageBox({ stage, color, primary = false }) {
+  const empty = stage.value == null;
+  return (
+    <div className={`stage-box ${empty ? "empty" : ""} ${primary ? "primary" : ""}`} style={{ "--accent": color }}>
+      <span className="stage-label">{stage.label}</span>
+      <strong>{fmt(stage.value)}</strong>
+      <span className="stage-status">{empty ? "fonte não conectada" : primary ? "entrada no período" : "estado atual"}</span>
+    </div>
+  );
+}
+
+function Flow({ stages, color, compact = false }) {
+  return (
+    <div className={`stage-flow ${compact ? "compact" : ""}`}>
+      {stages.map((stage, index) => (
+        <div className="flow-unit" key={stage.key}>
+          {index > 0 && <Arrow rate={stage.conversion} muted={stage.value == null} />}
+          <StageBox stage={stage} color={color} primary={index === 0} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AudiencePanel({ audience, accent }) {
+  const sortedChannels = useMemo(
+    () => [...(audience.channels || [])].sort((a, b) => b.leads - a.leads),
+    [audience.channels]
+  );
+
+  return (
+    <section className="audience-panel" style={{ "--audience": accent }}>
+      <div className="audience-head">
+        <div>
+          <span className="eyebrow">Funil {audience.label}</span>
+          <h2>{audience.label}</h2>
+        </div>
+        <div className="audience-stats">
+          <div><span>Leads</span><strong>{fmt(audience.totals.leads)}</strong></div>
+          <div><span>Convertidos</span><strong>{fmt(audience.totals.converted)}</strong></div>
+          <div><span>Conversão</span><strong>{fmtPct(audience.totals.conversion)}</strong></div>
+        </div>
+      </div>
+
+      <div className="overview-flow">
+        <div className="flow-caption"><span className="pulse" /> Visão consolidada</div>
+        <div className="scroll-shell"><Flow stages={audience.stages} color={accent} /></div>
+      </div>
+
+      <div className="channel-head">
+        <div>
+          <h3>Canais de entrada</h3>
+          <p>Cada linha acompanha o mesmo grupo de leads até a conversão.</p>
+        </div>
+        <span className="coverage-badge">{audience.stagesAvailable ? "etapas conectadas" : "etapas pendentes"}</span>
+      </div>
+
+      <div className="channel-list">
+        {sortedChannels.map((channel) => {
+          const tone = TONES[channel.tone] || TONES.slate;
+          return (
+            <article className="channel-row" key={channel.key}>
+              <div className="channel-name" style={{ "--channel": tone }}>
+                <span className="channel-mark" />
+                <div><strong>{channel.label}</strong><small>{channel.note || `${fmt(channel.leads)} leads no periodo`}</small></div>
+              </div>
+              <div className="scroll-shell channel-scroll"><Flow stages={channel.stages} color={tone} compact /></div>
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function Loading() {
+  return <div className="loading"><span /><p>Montando o mapa dos funis…</p></div>;
+}
+
+export default function GrowthFunnelsView() {
+  const [from, setFrom] = useState("2026-07-01");
+  const [to, setTo] = useState(() => shift(0));
+  const [preset, setPreset] = useState("q3");
+  const [view, setView] = useState("global");
+  const [data, setData] = useState(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const load = useCallback(async (quiet = false) => {
+    quiet ? setRefreshing(true) : setLoading(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/growth-funnels?from=${from}&to=${to}&_=${Date.now()}`, { cache: "no-store" });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Falha ao carregar os funis");
+      setData(payload);
+      if (payload.range) { setFrom(payload.range.from); setTo(payload.range.to); }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false); setRefreshing(false);
+    }
+  }, [from, to]);
+
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const timer = setInterval(() => load(true), 300_000);
+    return () => clearInterval(timer);
+  }, [load]);
+
+  function applyPreset(key) {
+    setPreset(key);
+    if (key === "7d") setFrom(shift(-6));
+    if (key === "30d") setFrom(shift(-29));
+    if (key === "q3") setFrom("2026-07-01");
+    setTo(shift(0));
+  }
+
+  const audiences = data?.audiences || {};
+  const showCreators = view === "global" || view === "creators";
+  const showBrands = view === "global" || view === "brands";
+
+  return (
+    <main className="funnel-page">
+      <nav className="topbar">
+        <a href="/hub" className="brand"><span className="brand-glyph">A</span><span>Amplify UGC</span><small>/ funis</small></a>
+        <a href="/hub" className="back">← Hub de Dashboards</a>
+      </nav>
+
+      <div className="page-wrap">
+        <header className="hero">
+          <div className="hero-copy">
+            <span className="hero-kicker"><i /> Growth command center</span>
+            <h1>Visão Global<br /><em>dos Funis</em></h1>
+            <p>De onde cada lead entra, como avança pela máquina e quanto converte — Creators e Marcas no mesmo mapa.</p>
+          </div>
+          <div className="hero-orbit" aria-hidden="true">
+            <div className="orbit orbit-a" /><div className="orbit orbit-b" />
+            <div className="orbit-core"><span>{fmt(data?.summary?.leads)}</span><small>leads</small></div>
+            <span className="orbit-label creators">Creators</span><span className="orbit-label brands">Marcas</span>
+          </div>
+        </header>
+
+        <section className="control-deck">
+          <div className="segmented" aria-label="Selecionar visão">
+            {[['global','Global'],['creators','Creators'],['brands','Marcas']].map(([key,label]) =>
+              <button key={key} className={view === key ? "active" : ""} onClick={() => setView(key)}>{label}</button>
+            )}
+          </div>
+          <div className="presets">
+            {[['7d','7 dias'],['30d','30 dias'],['q3','Q3']].map(([key,label]) =>
+              <button key={key} className={preset === key ? "active" : ""} onClick={() => applyPreset(key)}>{label}</button>
+            )}
+          </div>
+          <div className="date-fields">
+            <label>De<input type="date" value={from} min={data?.coverage?.from} max={to} onChange={(e) => { setPreset(""); setFrom(e.target.value); }} /></label>
+            <span>→</span>
+            <label>Até<input type="date" value={to} min={from} max={data?.coverage?.to} onChange={(e) => { setPreset(""); setTo(e.target.value); }} /></label>
+          </div>
+          <button className={`refresh ${refreshing ? "spin" : ""}`} onClick={() => load(true)}><span>↻</span> Atualizar</button>
+        </section>
+
+        {error && <div className="error"><strong>Os funis nao carregaram.</strong><span>{error}</span><button onClick={() => load()}>Tentar novamente</button></div>}
+        {loading && !data ? <Loading /> : data && <>
+          <section className="signal-strip">
+            <div><span>Total de leads</span><strong>{fmt(data.summary.leads)}</strong><small>{data.range.from.split('-').reverse().join('/')} → {data.range.to.split('-').reverse().join('/')}</small></div>
+            <div className="creator-signal"><span>Creators</span><strong>{fmt(data.summary.creators.leads)}</strong><small>{fmtPct(data.summary.creators.conversion)} lead → agenciado</small></div>
+            <div className="brand-signal"><span>Marcas</span><strong>{fmt(data.summary.brands.leads)}</strong><small>{data.summary.brands.conversion == null ? "etapas comerciais pendentes" : `${fmtPct(data.summary.brands.conversion)} lead → fechado`}</small></div>
+            <div><span>Atualização</span><strong className="status-value"><i className={data.stale ? "warn" : ""} />{data.stale ? "Snapshot" : "Automático"}</strong><small>{new Date(data.generatedAt).toLocaleString("pt-BR")}</small></div>
+          </section>
+
+          <div className="audience-stack">
+            {showCreators && <AudiencePanel audience={audiences.creators} accent="#9B8CFF" />}
+            {showBrands && <AudiencePanel audience={audiences.brands} accent="#FF765F" />}
+          </div>
+
+          <footer className="methodology">
+            <div><span>Como ler</span><p>{data.methodology.cohort}</p></div>
+            <div><span>Cobertura</span><p>Dados disponiveis de {data.coverage.from.split('-').reverse().join('/')} a {data.coverage.to.split('-').reverse().join('/')}.</p></div>
+            <div><span>Lacunas honestas</span><p>Quadrados com “—” ainda não possuem etapa confiável na fonte e serão preenchidos conforme o novo funil entrar em operação.</p></div>
+          </footer>
+        </>}
+      </div>
+
+      <style jsx global>{`
+        :global(body){background:#070910!important;color:#F4F6FF!important}.funnel-page{min-height:100vh;background:radial-gradient(circle at 78% 8%,rgba(155,140,255,.11),transparent 28%),radial-gradient(circle at 12% 42%,rgba(255,118,95,.07),transparent 24%),#070910;color:#F4F6FF;font-family:Inter,system-ui,sans-serif}.topbar{height:64px;border-bottom:1px solid rgba(255,255,255,.08);display:flex;align-items:center;justify-content:space-between;padding:0 max(24px,calc((100vw - 1440px)/2));background:rgba(7,9,16,.86);backdrop-filter:blur(18px);position:sticky;top:0;z-index:20}.brand{display:flex;align-items:center;gap:10px;color:#fff;text-decoration:none;font-weight:800}.brand small{color:#646B7E;font-family:ui-monospace,monospace;font-weight:500}.brand-glyph{display:grid;place-items:center;width:28px;height:28px;background:linear-gradient(135deg,#3157FF 0 48%,#EA1A4E 48%);border-radius:8px;font-size:13px}.back{color:#8E95A8;text-decoration:none;font-size:13px}.back:hover{color:#fff}.page-wrap{max-width:1440px;margin:auto;padding:44px 24px 72px}.hero{min-height:300px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(255,255,255,.08);position:relative;overflow:hidden}.hero-copy{max-width:780px;position:relative;z-index:2}.hero-kicker,.eyebrow{font:700 11px/1 ui-monospace,monospace;letter-spacing:.18em;text-transform:uppercase;color:#A7AFC1}.hero-kicker i{display:inline-block;width:7px;height:7px;border-radius:50%;background:#47D7A0;box-shadow:0 0 14px #47D7A0;margin-right:8px}.hero h1{font-size:clamp(52px,7vw,94px);line-height:.88;letter-spacing:-.065em;margin:22px 0 24px;font-weight:850}.hero h1 em{font-style:normal;color:transparent;-webkit-text-stroke:1px rgba(244,246,255,.5)}.hero p{max-width:690px;color:#969DAF;font-size:16px;line-height:1.6}.hero-orbit{width:330px;height:250px;position:relative;flex:0 0 330px}.orbit{position:absolute;border:1px solid rgba(255,255,255,.12);border-radius:50%;inset:30px;transform:rotate(-14deg)}.orbit-b{inset:66px 20px;transform:rotate(24deg);border-color:rgba(155,140,255,.27)}.orbit-core{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:112px;height:112px;border-radius:50%;display:grid;place-content:center;text-align:center;background:#10131E;border:1px solid rgba(155,140,255,.5);box-shadow:0 0 50px rgba(155,140,255,.14)}.orbit-core span{font-size:28px;font-weight:900}.orbit-core small{font:600 10px ui-monospace;color:#7F879A;text-transform:uppercase}.orbit-label{position:absolute;font:700 10px ui-monospace;text-transform:uppercase;letter-spacing:.12em}.orbit-label.creators{left:18px;top:45px;color:#9B8CFF}.orbit-label.brands{right:8px;bottom:46px;color:#FF765F}.control-deck{margin:24px 0;display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:12px;border:1px solid rgba(255,255,255,.09);background:#0D1018;border-radius:14px}.segmented,.presets{display:flex;background:#070910;border:1px solid rgba(255,255,255,.07);padding:3px;border-radius:10px}.segmented button,.presets button{border:0;background:transparent;color:#777F92;padding:8px 14px;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer}.segmented button.active{background:#F4F6FF;color:#090B12}.presets button.active{background:rgba(155,140,255,.15);color:#C4BAFF}.date-fields{display:flex;align-items:end;gap:8px;margin-left:auto}.date-fields label{display:grid;gap:4px;color:#666E81;font:700 9px ui-monospace;text-transform:uppercase}.date-fields input{color:#CBD0DC;background:#070910;border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:7px 9px;font:600 11px ui-monospace;color-scheme:dark}.date-fields>span{padding-bottom:8px;color:#5D6578}.refresh{border:1px solid rgba(255,255,255,.1);background:#151925;color:#DDE1EA;border-radius:9px;padding:9px 13px;font-weight:700;font-size:12px;cursor:pointer}.refresh.spin span{display:inline-block;animation:spin 1s linear infinite}.signal-strip{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid rgba(255,255,255,.09);border-radius:16px;overflow:hidden;background:#0B0E16;margin-bottom:24px}.signal-strip>div{padding:20px 22px;border-right:1px solid rgba(255,255,255,.08);display:grid;gap:5px}.signal-strip>div:last-child{border:0}.signal-strip span{font:700 10px ui-monospace;text-transform:uppercase;letter-spacing:.1em;color:#747C90}.signal-strip strong{font-size:28px;letter-spacing:-.04em}.signal-strip small{font-size:10px;color:#646C80}.creator-signal strong{color:#9B8CFF}.brand-signal strong{color:#FF765F}.status-value{font-size:16px!important;display:flex;align-items:center;gap:8px}.status-value i{width:8px;height:8px;border-radius:50%;background:#47D7A0;box-shadow:0 0 10px #47D7A0}.status-value i.warn{background:#F6B84B;box-shadow:none}.audience-stack{display:grid;gap:28px}.audience-panel{border:1px solid rgba(255,255,255,.09);background:linear-gradient(145deg,color-mix(in srgb,var(--audience) 5%,#0B0E16),#0B0E16 36%);border-radius:22px;overflow:hidden}.audience-panel:before{content:"";display:block;height:3px;background:linear-gradient(90deg,var(--audience),transparent 72%)}.audience-head{padding:28px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid rgba(255,255,255,.07)}.audience-head .eyebrow{color:var(--audience)}.audience-head h2{font-size:36px;letter-spacing:-.05em;margin:6px 0 0}.audience-stats{display:flex;gap:34px}.audience-stats div{display:grid;gap:4px}.audience-stats span{font:700 9px ui-monospace;text-transform:uppercase;color:#6F778B}.audience-stats strong{font-size:20px}.overview-flow{padding:24px 28px;border-bottom:1px solid rgba(255,255,255,.07)}.flow-caption{font:700 10px ui-monospace;text-transform:uppercase;letter-spacing:.12em;color:#798196;margin-bottom:16px}.pulse{display:inline-block;width:6px;height:6px;background:var(--audience);border-radius:50%;margin-right:6px;box-shadow:0 0 10px var(--audience)}.scroll-shell{overflow-x:auto;padding-bottom:5px}.stage-flow{display:flex;align-items:center;min-width:max-content}.flow-unit{display:flex;align-items:center}.stage-box{width:160px;min-height:104px;padding:15px;border:1px solid color-mix(in srgb,var(--accent) 35%,rgba(255,255,255,.1));background:color-mix(in srgb,var(--accent) 7%,#10131D);border-radius:12px;display:flex;flex-direction:column;justify-content:space-between}.stage-box.primary{background:var(--accent);color:#090B12;border-color:var(--accent)}.stage-box.empty{border-style:dashed;background:#0D1018}.stage-label{font:700 9px ui-monospace;text-transform:uppercase;letter-spacing:.08em;color:#8991A4}.primary .stage-label,.primary .stage-status{color:rgba(9,11,18,.62)}.stage-box strong{font-size:27px;letter-spacing:-.04em}.stage-status{font-size:9px;color:#5F677B}.empty strong{color:#7A8296}.flow-arrow{width:82px;display:grid;place-items:center;gap:3px;color:#8F97A9}.flow-arrow span{font:800 10px ui-monospace}.flow-arrow svg{width:58px}.flow-arrow path{stroke:currentColor;fill:none;stroke-width:1.2}.flow-arrow.muted{color:#404757}.channel-head{display:flex;align-items:end;justify-content:space-between;padding:24px 28px 15px}.channel-head h3{font-size:17px;margin:0 0 5px}.channel-head p{font-size:12px;color:#6E7689}.coverage-badge{font:700 9px ui-monospace;text-transform:uppercase;letter-spacing:.08em;color:var(--audience);border:1px solid color-mix(in srgb,var(--audience) 30%,transparent);background:color-mix(in srgb,var(--audience) 8%,transparent);padding:6px 9px;border-radius:999px}.channel-list{padding:0 14px 14px}.channel-row{display:grid;grid-template-columns:190px 1fr;align-items:center;border-top:1px solid rgba(255,255,255,.055);padding:14px}.channel-name{display:flex;align-items:center;gap:11px;min-width:0}.channel-mark{width:9px;height:38px;border-radius:10px;background:var(--channel);box-shadow:0 0 18px color-mix(in srgb,var(--channel) 35%,transparent)}.channel-name div{display:grid;gap:4px;min-width:0}.channel-name strong{font-size:12px}.channel-name small{font-size:9px;color:#5F677A;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.compact .stage-box{width:120px;min-height:70px;padding:10px}.compact .stage-box strong{font-size:18px}.compact .stage-label{font-size:8px}.compact .stage-status{display:none}.compact .flow-arrow{width:60px}.compact .flow-arrow svg{width:42px}.channel-scroll{padding-left:8px}.methodology{margin-top:24px;display:grid;grid-template-columns:1.2fr .8fr 1.2fr;gap:1px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.08);border-radius:14px;overflow:hidden}.methodology>div{background:#0B0E16;padding:18px}.methodology span{font:700 9px ui-monospace;text-transform:uppercase;letter-spacing:.1em;color:#858DA0}.methodology p{font-size:11px;line-height:1.5;color:#697186;margin-top:7px}.loading{min-height:360px;display:grid;place-content:center;justify-items:center;gap:12px;color:#7D8598}.loading span{width:34px;height:34px;border-radius:50%;border:2px solid rgba(155,140,255,.18);border-top-color:#9B8CFF;animation:spin .8s linear infinite}.error{padding:18px;border:1px solid rgba(255,118,95,.28);background:rgba(255,118,95,.07);border-radius:12px;display:flex;gap:12px;align-items:center;color:#FFB1A4}.error span{color:#A78380;font-size:12px}.error button{margin-left:auto;background:#FF765F;border:0;border-radius:8px;padding:8px 11px;font-weight:800;cursor:pointer}@keyframes spin{to{transform:rotate(360deg)}}
+        @media(max-width:900px){.hero-orbit{display:none}.signal-strip{grid-template-columns:repeat(2,1fr)}.signal-strip>div:nth-child(2){border-right:0}.signal-strip>div:nth-child(-n+2){border-bottom:1px solid rgba(255,255,255,.08)}.audience-head{align-items:flex-start}.audience-stats{gap:16px}.channel-row{grid-template-columns:150px 1fr}.methodology{grid-template-columns:1fr}.date-fields{margin-left:0}.control-deck{align-items:flex-end}}
+        @media(max-width:620px){.topbar{padding:0 16px}.brand small{display:none}.back{font-size:11px}.page-wrap{padding:28px 14px 48px}.hero{min-height:250px}.hero h1{font-size:54px}.hero p{font-size:14px}.control-deck{display:grid;grid-template-columns:1fr auto}.segmented{grid-column:1/-1}.segmented button{flex:1}.presets{grid-column:1/-1}.presets button{flex:1}.date-fields{grid-column:1/-1;width:100%}.date-fields label{flex:1}.date-fields input{width:100%}.signal-strip{grid-template-columns:1fr 1fr}.signal-strip>div{padding:16px}.signal-strip strong{font-size:22px}.audience-head{padding:22px 18px;display:grid;gap:18px}.audience-head h2{font-size:31px}.audience-stats{justify-content:space-between}.audience-stats strong{font-size:17px}.overview-flow{padding:20px 18px}.channel-head{padding:20px 18px 12px;align-items:start}.channel-head p{max-width:220px}.coverage-badge{display:none}.channel-list{padding:0 5px 8px}.channel-row{grid-template-columns:125px 1fr;padding:12px 8px}.channel-name small{max-width:104px}.stage-box{width:138px}.flow-arrow{width:68px}.methodology{grid-template-columns:1fr}.hero-kicker{font-size:9px}}
+        @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;animation:none!important;transition:none!important}}
+      `}</style>
+    </main>
+  );
+}
