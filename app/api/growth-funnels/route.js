@@ -87,6 +87,24 @@ function aggregate(snapshot, audience, from, to) {
     return { ...channel, leads: subset.length, stages: stageValues(subset) }
   }).filter((channel) => channel.leads > 0 || channel.key === 'other')
 
+  const financialGroups = audience === 'creators' && gmvAvailable
+    ? [
+        { key: 'machine', label: 'Máquina', rows: rows.filter((row) => row.c !== 'sniper') },
+        { key: 'sniper', label: 'Sniper', rows: rows.filter((row) => row.c === 'sniper') },
+      ].map((group) => {
+        const stages = stageValues(group.rows)
+        const finalStage = stages.at(-1)
+        return {
+          key: group.key,
+          label: group.label,
+          stages,
+          gmv: finalStage?.gmv ?? null,
+          gmvCount: finalStage?.gmvCount ?? null,
+          amplifyGain: finalStage?.amplifyGain ?? null,
+        }
+      })
+    : null
+
   const byDay = new Map()
   for (const row of rows) {
     const item = byDay.get(row.d) || { date: row.d, leads: 0, converted: stagesAvailable ? 0 : null }
@@ -111,6 +129,7 @@ function aggregate(snapshot, audience, from, to) {
     },
     stages: totalStages,
     channels,
+    financialGroups,
     daily: [...byDay.values()].sort((a, b) => a.date.localeCompare(b.date)),
     coverage: source.coverage || {},
     quality: source.quality || null,
