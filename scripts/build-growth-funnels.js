@@ -5,6 +5,57 @@ const BRAND_DB = '365b0bbe-f153-801f-a115-f78dc730a1df';
 const SNIPER_DB = '344b0bbef153803d9fe9f956e2f67f20';
 const COVERAGE_FROM = process.env.FUNNEL_COVERAGE_FROM || '2026-07-01';
 const OUTPUT = process.env.FUNNEL_SNAPSHOT_OUTPUT || '/tmp/growth-funnels-live.json';
+const BITRIX_WORKFLOW = process.env.BITRIX_WORKFLOW_PATH || '/tmp/bitrix-workflow.json';
+
+function nestedStrings(value, output = []) {
+  if (typeof value === 'string') output.push(value);
+  else if (Array.isArray(value)) value.forEach((item) => nestedStrings(item, output));
+  else if (value && typeof value === 'object') Object.values(value).forEach((item) => nestedStrings(item, output));
+  return output;
+}
+
+function bitrixBase() {
+  const workflow = JSON.parse(fs.readFileSync(BITRIX_WORKFLOW, 'utf8'));
+  const match = nestedStrings(workflow)
+    .map((value) => value.match(/https:\/\/[^\s"']+\.bitrix24\.com\.br\/rest\/\d+\/[^/]+\//i))
+    .find(Boolean);
+  if (!match) throw new Error('Bitrix webhook not found in approved workflow');
+  return match[0];
+}
+
+async function bitrixCall(base, method, parameters = {}) {
+  const url = new URL(`${base}${method}.json`);
+  Object.entries(parameters).forEach(([key, value]) => {
+    if (value == null) return;
+    if (Array.isArray(value)) value.forEach((item) => url.searchParams.append(`${key}[]`, String(item)));
+    else url.searchParams.append(key, String(value));
+  });
+  const response = await fetch(url);
+  const data = await response.json();
+  if (!response.ok || data.error) throw new Error(`Bitrix ${method} failed ${response.status} ${data.error || ''}`);
+  return data;
+}
+
+async function queryAllDeals(base, categoryId) {
+  const rows = [];
+  let start = 0;
+  do {
+    const data = await bitrixCall(base, 'crm.deal.list', {
+      'filter[CATEGORY_ID]': categoryId,
+      'order[ID]': 'ASC',
+      select: [
+        'ID', 'TITLE', 'CATEGORY_ID', 'STAGE_ID', 'DATE_CREATE', 'DATE_MODIFY', 'OPPORTUNITY', 'CURRENCY_ID',
+        'PHONE', 'EMAIL', 'UF_CRM_1782820123479', 'UF_CRM_1783518223560',
+        'UF_CRM_1784577505498', 'UF_CRM_1784577523021', 'UF_CRM_1784577552485',
+      ],
+      start,
+    });
+    rows.push(...(data.result || []));
+    if (data.next == null) break;
+    start = data.next;
+  } while (true);
+  return rows;
+}
 
 function plain(property) {
   if (!property) return '';
@@ -104,6 +155,121 @@ function brandRank(phase) {
   return null;
 }
 
+function firstPlain(page, names) {
+  for (const name of names) {
+    const value = plain(page?.properties?.[name]);
+    if (value) return value;
+  }
+  return '';
+}
+
+function normalizePhone(value) {
+  const digits = String(value || '').replace(/\D/g, '');
+  return digits.length >= 8 ? digits.slice(-11) : '';
+}
+
+function normalizeEmail(value) {
+  const email = normalize(value);
+  return email.includes('@') ? email : '';
+}
+
+function dealScalar(value) {
+  if (Array.isArray(value)) return value.map((item) => item?.VALUE || item?.value || item).filter(Boolean).join(' ');
+  return value == null ? '' : String(value);
+}
+
+function sniperBitrixRank(deal) {
+  if (!deal) return null;
+  const category = Number(deal.CATEGORY_ID);
+  const stage = String(deal.STAGE_ID || '');
+  if (category === 7) {
+    if (['C7:EXECUTING', 'C7:WON'].includes(stage)) return 6;
+    if (stage === 'C7:PREPAYMENT_INVOICE') return 5;
+    if (['C7:PREPARATION', 'C7:UC_5P8W7H', 'C7:UC_W4KDQY', 'C7:UC_Y5A7KO'].includes(stage)) return 4;
+    return 3;
+  }
+  if (category === 5) {
+    if (['C5:EXECUTING', 'C5:UC_0QVPA2', 'C5:FINAL_INVOICE', 'C5:WON'].includes(stage)) return 3;
+    if (stage === 'C5:PREPAYMENT_INVOICE') return 2;
+    return 1;
+  }
+  return null;
+}
+
+function brandBitrixRank(deal) {
+  if (!deal) return null;
+  const category = Number(deal.CATEGORY_ID);
+  const stage = String(deal.STAGE_ID || '');
+  if (category === 0) {
+    if (['UC_TSZ6T0', 'FINAL_INVOICE', 'UC_O2M6SW', 'UC_0N932N', 'WON'].includes(stage)) return 6;
+    if (['NEW', 'UC_7GD3LJ', 'PREPARATION'].includes(stage)) return 5;
+    return 4;
+  }
+  if (category === 1) {
+    if (['C1:EXECUTING', 'C1:WON'].includes(stage)) return 3;
+    if (stage === 'C1:PREPAYMENT_INVOICE') return 2;
+    if (['C1:PREPARATION', 'C1:UC_BCE7E7', 'C1:UC_1U0AND', 'C1:UC_Z0Y21M', 'C1:UC_T4OSDK', 'C1:UC_DMX2HZ', 'C1:UC_M3NHPY'].includes(stage)) return 1;
+    return 0;
+  }
+  return null;
+}
+
+function preferDeal(current, candidate, ranker) {
+  if (!current) return candidate;
+  const currentRank = ranker(current) ?? -1;
+  const candidateRank = ranker(candidate) ?? -1;
+  if (candidateRank !== currentRank) return candidateRank > currentRank ? candidate : current;
+  return Number(candidate.ID) > Number(current.ID) ? candidate : current;
+}
+
+function buildSniperDealIndex(deals) {
+  const byTitle = new Map();
+  const byName = new Map();
+  const byPhone = new Map();
+  for (const deal of deals) {
+    const title = normalize(deal.TITLE);
+    const name = normalize(deal.UF_CRM_1784577505498);
+    const phone = normalizePhone(deal.UF_CRM_1784577523021 || dealScalar(deal.PHONE));
+    if (title) byTitle.set(title, preferDeal(byTitle.get(title), deal, sniperBitrixRank));
+    if (name) byName.set(name, preferDeal(byName.get(name), deal, sniperBitrixRank));
+    if (phone) byPhone.set(phone, preferDeal(byPhone.get(phone), deal, sniperBitrixRank));
+  }
+  return { byTitle, byName, byPhone };
+}
+
+function matchSniperDeal(page, index) {
+  const creatorId = normalize(firstPlain(page, ['Creator ID', 'ID Creator']));
+  if (creatorId && index.byTitle.has(creatorId)) return { deal: index.byTitle.get(creatorId), method: 'creator_id' };
+  const name = normalize(firstPlain(page, ['Nome do Criador', 'Nome']));
+  if (name && index.byName.has(name)) return { deal: index.byName.get(name), method: 'name' };
+  const phone = normalizePhone(firstPlain(page, ['WhatsApp', 'Whatsapp', 'Whats']));
+  if (phone && index.byPhone.has(phone)) return { deal: index.byPhone.get(phone), method: 'phone' };
+  return { deal: null, method: null };
+}
+
+function buildBrandDealIndex(deals) {
+  const byPhone = new Map();
+  const byEmail = new Map();
+  for (const deal of deals) {
+    const phone = normalizePhone(deal.UF_CRM_1782820123479 || dealScalar(deal.PHONE));
+    const email = normalizeEmail(deal.UF_CRM_1783518223560 || dealScalar(deal.EMAIL));
+    if (phone) byPhone.set(phone, preferDeal(byPhone.get(phone), deal, brandBitrixRank));
+    if (email) byEmail.set(email, preferDeal(byEmail.get(email), deal, brandBitrixRank));
+  }
+  return { byPhone, byEmail };
+}
+
+function matchBrandDeal(page, index) {
+  const phone = normalizePhone(firstPlain(page, ['Whats', 'WhatsApp', 'Whatsapp']));
+  const email = normalizeEmail(firstPlain(page, ['Email', 'E-mail']));
+  const byPhone = phone ? index.byPhone.get(phone) : null;
+  const byEmail = email ? index.byEmail.get(email) : null;
+  if (byPhone && byEmail && byPhone.ID !== byEmail.ID) return { deal: preferDeal(byPhone, byEmail, brandBitrixRank), method: 'phone_or_email' };
+  if (byPhone) return { deal: byPhone, method: 'phone' };
+  if (byEmail) return { deal: byEmail, method: 'email' };
+  return { deal: null, method: null };
+}
+
 async function queryAll(token, databaseId, filter = null) {
   const results = [];
   let cursor;
@@ -135,18 +301,35 @@ function compactCreator(page) {
   return { d: date, c: creatorChannel(plain(page.properties?.Origem)), r: creatorRank(phase), g: propertyNumber(page.properties?.GMV), s: 'machine' };
 }
 
-function compactSniper(page) {
+function compactSniper(page, dealIndex) {
   const date = localDate(propertyDate(page, 'Data do primeiro Huggy') || page.created_time);
   if (!date || date < COVERAGE_FROM) return null;
   const phase = plain(page.properties?.['Status de contato']);
-  return { d: date, c: 'sniper', r: creatorRank(phase), g: propertyNumber(page.properties?.GMV), s: 'sniper' };
+  const match = matchSniperDeal(page, dealIndex);
+  return {
+    d: date,
+    c: 'sniper',
+    r: creatorRank(phase),
+    b: match.deal ? sniperBitrixRank(match.deal) : null,
+    x: Boolean(match.deal),
+    j: match.method,
+    g: propertyNumber(page.properties?.GMV),
+    s: 'sniper',
+  };
 }
 
-function compactBrand(page) {
+function compactBrand(page, dealIndex) {
   const date = localDate(page.created_time);
   if (!date) return null;
-  const phase = plain(page.properties?.['Qual a fase do atendimento?']);
-  return { d: date, c: brandChannel(page), r: brandRank(phase), s: 'sales' };
+  const match = matchBrandDeal(page, dealIndex);
+  return {
+    d: date,
+    c: brandChannel(page),
+    r: match.deal ? brandBitrixRank(match.deal) : 0,
+    x: Boolean(match.deal),
+    j: match.method,
+    s: 'sales',
+  };
 }
 
 function countBy(rows, field) {
@@ -163,13 +346,23 @@ async function main() {
   const token = credential?.data?.apiKey || credential?.data?.apiToken || credential?.data?.token;
   if (!token) throw new Error('Notion credential not found');
 
-  const [creatorPages, brandPages, sniperPages] = await Promise.all([
+  const base = bitrixBase();
+  const [creatorPages, brandPages, sniperPages, brandCloserDeals, brandSdrDeals, sniperSdrDeals, sniperCloserDeals] = await Promise.all([
     queryAll(token, CREATOR_DB, createdSinceFilter()),
     queryAll(token, BRAND_DB, createdSinceFilter()),
     queryAll(token, SNIPER_DB, null),
+    queryAllDeals(base, 0),
+    queryAllDeals(base, 1),
+    queryAllDeals(base, 5),
+    queryAllDeals(base, 7),
   ]);
 
-  const creators = [...creatorPages.map(compactCreator), ...sniperPages.map(compactSniper)].filter(Boolean);
+  const sniperDealIndex = buildSniperDealIndex([...sniperSdrDeals, ...sniperCloserDeals]);
+  const brandDealIndex = buildBrandDealIndex([...brandSdrDeals, ...brandCloserDeals]);
+  const creators = [
+    ...creatorPages.map(compactCreator),
+    ...sniperPages.map((page) => compactSniper(page, sniperDealIndex)),
+  ].filter(Boolean);
   const brandWithoutTests = brandPages.filter((page) => !isTestBrand(page));
   const seenBrands = new Set();
   const uniqueBrandPages = brandWithoutTests.filter((page) => {
@@ -178,31 +371,56 @@ async function main() {
     seenBrands.add(identity);
     return true;
   });
-  const brands = uniqueBrandPages.map(compactBrand).filter(Boolean);
+  const brands = uniqueBrandPages.map((page) => compactBrand(page, brandDealIndex)).filter(Boolean);
+  const sniperRows = creators.filter((row) => row.s === 'sniper');
+  const matchedSniperRows = sniperRows.filter((row) => row.x);
+  const matchedBrandRows = brands.filter((row) => row.x);
   const output = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     generatedAt: new Date().toISOString(),
     timezone: 'America/Sao_Paulo',
     coverage: { from: COVERAGE_FROM, to: localDate(new Date().toISOString()) },
     methodology: {
       cohort: 'Leads criados no periodo; etapas representam o estado atual desses mesmos leads.',
-      creators: 'Base Novos Creators + Leads Outbound/Sniper; renovacoes excluidas. GMV e o valor atual registrado na coorte, nao o GMV gerado dentro do intervalo do filtro.',
-      brands: 'Leads unicos do funil de vendas; testes e envios duplicados por WhatsApp sao removidos. Canal pago identificado por UTM. Etapas comerciais ficam vazias enquanto a fase nao for preenchida na fonte.',
+      creators: 'Maquina usa Base Novos Creators. Sniper usa entradas da Base Leads Outbound e etapas atuais dos funis SDR/Closer de Aquisicao no Bitrix. Renovacoes excluidas. GMV e o valor atual registrado na coorte, nao o GMV gerado dentro do intervalo.',
+      brands: 'Leads unicos e atribuicao vem do Notion/LP; testes e duplicados sao removidos. Etapas comerciais vem dos funis SDR/Closer de Marcas no Bitrix, ligados por WhatsApp ou e-mail. Ganho mensal e tratado como conversao operacional mesmo quando o stage Bitrix ainda esta configurado como em processo.',
+    },
+    sources: {
+      bitrix: {
+        status: 'live',
+        pipelines: {
+          brands: { sdrCategoryId: 1, closerCategoryId: 0, sdrDeals: brandSdrDeals.length, closerDeals: brandCloserDeals.length },
+          sniper: { sdrCategoryId: 5, closerCategoryId: 7, sdrDeals: sniperSdrDeals.length, closerDeals: sniperCloserDeals.length },
+        },
+      },
     },
     creators: {
       rows: creators,
-      coverage: { stages: true, channel: true, gmv: true },
+      coverage: { stages: true, sniperBitrixStages: true, channel: true, gmv: true },
       sourceCounts: countBy(creators, 's'),
+      bitrixQuality: {
+        sniperLeads: sniperRows.length,
+        matchedLeads: matchedSniperRows.length,
+        unmatchedLeads: sniperRows.length - matchedSniperRows.length,
+        matchMethods: countBy(matchedSniperRows, 'j'),
+        sdrDeals: sniperSdrDeals.length,
+        closerDeals: sniperCloserDeals.length,
+      },
     },
     brands: {
       rows: brands,
-      coverage: { stages: brands.some((row) => row.r != null), channel: true, gmv: false },
+      coverage: { stages: true, channel: true, gmv: false, bitrixJoin: true },
       sourceCounts: countBy(brands, 's'),
       quality: {
         rawSubmissions: brandPages.length,
         excludedTests: brandPages.length - brandWithoutTests.length,
         excludedDuplicates: brandWithoutTests.length - uniqueBrandPages.length,
         uniqueLeads: brands.length,
+        bitrixMatchedLeads: matchedBrandRows.length,
+        bitrixUnmatchedLeads: brands.length - matchedBrandRows.length,
+        bitrixMatchMethods: countBy(matchedBrandRows, 'j'),
+        sdrDeals: brandSdrDeals.length,
+        closerDeals: brandCloserDeals.length,
       },
     },
   };

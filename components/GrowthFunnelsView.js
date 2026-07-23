@@ -127,7 +127,7 @@ function AudiencePanel({ audience, accent }) {
                 <span className="channel-mark" />
                 <div className="channel-summary">
                   <strong>{channel.label}</strong>
-                  <small>{fmt(channel.leads)} leads no período{channel.note ? ` · ${channel.note}` : ""}</small>
+                  <small title={channel.note || undefined}>{fmt(channel.leads)} leads no período{channel.connected != null ? ` · ${fmt(channel.connected)} no Bitrix` : channel.note ? ` · ${channel.note}` : ""}</small>
                   <span className="channel-final">
                     <em>Conversão final</em>
                     <b>{fmtPct(finalConversion)}</b>
@@ -237,7 +237,7 @@ export default function GrowthFunnelsView() {
         {loading && !data ? <Loading /> : data && <>
           <section className="signal-strip">
             <div className="creator-signal"><span>Creators</span><strong>{fmt(data.summary.creators.leads)}</strong><small>{fmtPct(data.summary.creators.conversion)} lead → agenciado</small></div>
-            <div className="brand-signal"><span>Marcas · leads únicos</span><strong>{fmt(data.summary.brands.leads)}</strong><small>{audiences.brands?.quality ? `${fmt(audiences.brands.quality.excludedDuplicates)} duplicados + ${fmt(audiences.brands.quality.excludedTests)} testes removidos` : "etapas comerciais pendentes"}</small></div>
+            <div className="brand-signal"><span>Marcas · leads únicos</span><strong>{fmt(data.summary.brands.leads)}</strong><small>{audiences.brands?.quality ? `${fmt(audiences.brands.quality.bitrixMatchedLeads)} conectados ao Bitrix neste período` : "integração comercial pendente"}</small></div>
             <div><span>Atualização</span><strong className="status-value"><i className={data.stale ? "warn" : ""} />{data.stale ? "Snapshot" : "Automático"}</strong><small>{new Date(data.generatedAt).toLocaleString("pt-BR")}</small></div>
           </section>
 
@@ -249,7 +249,7 @@ export default function GrowthFunnelsView() {
           <footer className="methodology">
             <div><span>Como ler</span><p>{data.methodology.cohort}</p></div>
             <div><span>GMV registrado</span><p>{data.methodology.creators} Ganho Amplify calculado como exatamente 1% do GMV final registrado.</p></div>
-            <div><span>Lacunas honestas</span><p>Quadrados com “—” ainda não possuem etapa confiável na fonte e serão preenchidos conforme o novo funil entrar em operação.</p></div>
+            <div><span>Bitrix conectado</span><p>{data.methodology.brands} Leads sem vínculo determinístico permanecem apenas na entrada, sem conversão inventada.</p></div>
           </footer>
         </>}
       </div>
