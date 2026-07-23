@@ -100,6 +100,7 @@ function aggregate(snapshot, audience, from, to) {
     channels,
     daily: [...byDay.values()].sort((a, b) => a.date.localeCompare(b.date)),
     coverage: source.coverage || {},
+    quality: source.quality || null,
   }
 }
 

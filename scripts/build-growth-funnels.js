@@ -12,6 +12,8 @@ function plain(property) {
   if (property.type === 'title') return (property.title || []).map((item) => item.plain_text || '').join('');
   if (property.type === 'select') return property.select?.name || '';
   if (property.type === 'status') return property.status?.name || '';
+  if (property.type === 'email') return property.email || '';
+  if (property.type === 'phone_number') return property.phone_number || '';
   if (property.type === 'formula') return String(property.formula?.string ?? property.formula?.number ?? '');
   return '';
 }
@@ -35,6 +37,21 @@ function normalize(value) {
 
 function isRenewal(page) {
   return normalize(plain(page?.properties?.['Qual a plataforma de atendimento?'])).includes('renov');
+}
+
+function isTestBrand(page) {
+  const fields = ['Nome', 'Empresa', 'Origem', '_source', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_content'];
+  return fields.some((field) => /(^|\b)(test|teste|qa|interno)(\b|$)/i.test(normalize(plain(page.properties?.[field]))));
+}
+
+function brandIdentity(page) {
+  const phone = plain(page.properties?.Whats).replace(/\D/g, '');
+  if (phone.length >= 8) return `phone:${phone}`;
+  const email = normalize(plain(page.properties?.Email));
+  if (email) return `email:${email}`;
+  const instagram = normalize(plain(page.properties?.Instagram)).replace(/^@/, '');
+  if (instagram) return `instagram:${instagram}`;
+  return `page:${page.id}`;
 }
 
 function creatorChannel(origin) {
@@ -145,7 +162,15 @@ async function main() {
   ]);
 
   const creators = [...creatorPages.map(compactCreator), ...sniperPages.map(compactSniper)].filter(Boolean);
-  const brands = brandPages.map(compactBrand).filter(Boolean);
+  const brandWithoutTests = brandPages.filter((page) => !isTestBrand(page));
+  const seenBrands = new Set();
+  const uniqueBrandPages = brandWithoutTests.filter((page) => {
+    const identity = brandIdentity(page);
+    if (seenBrands.has(identity)) return false;
+    seenBrands.add(identity);
+    return true;
+  });
+  const brands = uniqueBrandPages.map(compactBrand).filter(Boolean);
   const output = {
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
@@ -154,7 +179,7 @@ async function main() {
     methodology: {
       cohort: 'Leads criados no periodo; etapas representam o estado atual desses mesmos leads.',
       creators: 'Base Novos Creators + Leads Outbound/Sniper; renovacoes excluidas.',
-      brands: 'Funil de vendas; canal pago identificado por UTM. Etapas comerciais ficam vazias enquanto a fase nao for preenchida na fonte.',
+      brands: 'Leads unicos do funil de vendas; testes e envios duplicados por WhatsApp sao removidos. Canal pago identificado por UTM. Etapas comerciais ficam vazias enquanto a fase nao for preenchida na fonte.',
     },
     creators: {
       rows: creators,
@@ -165,6 +190,12 @@ async function main() {
       rows: brands,
       coverage: { stages: brands.some((row) => row.r != null), channel: true },
       sourceCounts: countBy(brands, 's'),
+      quality: {
+        rawSubmissions: brandPages.length,
+        excludedTests: brandPages.length - brandWithoutTests.length,
+        excludedDuplicates: brandWithoutTests.length - uniqueBrandPages.length,
+        uniqueLeads: brands.length,
+      },
     },
   };
   fs.writeFileSync(OUTPUT, JSON.stringify(output));
