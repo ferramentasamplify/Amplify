@@ -57,19 +57,28 @@ function percent(from, to) {
   return (to / from) * 100
 }
 
+function money(rows) {
+  return rows.reduce((total, row) => total + (Number(row.g) || 0), 0)
+}
+
 function aggregate(snapshot, audience, from, to) {
   const config = AUDIENCE_CONFIG[audience]
   const source = snapshot[audience] || {}
   const rows = (Array.isArray(source.rows) ? source.rows : []).filter((row) => row.d >= from && row.d <= to)
   const stagesAvailable = source.coverage?.stages !== false
+  const gmvAvailable = source.coverage?.gmv === true
 
   const stageValues = (subset) => config.stages.map((stage, index) => {
-    if (index > 0 && !stagesAvailable) return { ...stage, value: null, conversion: null }
-    const value = index === 0 ? subset.length : subset.filter((row) => Number(row.r) >= stage.rank).length
-    return { ...stage, value }
+    if (index > 0 && !stagesAvailable) return { ...stage, value: null, conversion: null, gmv: null, gmvCount: null, gmvCoverage: null, amplifyGain: null }
+    const stageRows = index === 0 ? subset : subset.filter((row) => Number(row.r) >= stage.rank)
+    const value = stageRows.length
+    const gmvCount = gmvAvailable ? stageRows.filter((row) => Number(row.g) > 0).length : null
+    const gmv = gmvAvailable ? money(stageRows) : null
+    return { ...stage, value, gmv, gmvCount, gmvCoverage: gmvAvailable ? percent(value, gmvCount) : null }
   }).map((stage, index, all) => ({
     ...stage,
     conversion: index === 0 ? null : percent(all[index - 1].value, stage.value),
+    amplifyGain: index === all.length - 1 && stage.gmv != null ? stage.gmv * 0.01 : null,
   }))
 
   const totalStages = stageValues(rows)
@@ -95,6 +104,10 @@ function aggregate(snapshot, audience, from, to) {
       leads: totalStages[0]?.value || 0,
       converted: totalStages.at(-1)?.value ?? null,
       conversion: percent(totalStages[0]?.value, totalStages.at(-1)?.value),
+      gmv: totalStages.at(-1)?.gmv ?? null,
+      gmvCount: totalStages.at(-1)?.gmvCount ?? null,
+      gmvCoverage: totalStages.at(-1)?.gmvCoverage ?? null,
+      amplifyGain: totalStages.at(-1)?.amplifyGain ?? null,
     },
     stages: totalStages,
     channels,
@@ -136,7 +149,6 @@ export async function GET(request) {
       range: { from, to },
       methodology: snapshot.methodology,
       summary: {
-        leads: creators.totals.leads + brands.totals.leads,
         creators: creators.totals,
         brands: brands.totals,
       },

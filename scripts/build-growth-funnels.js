@@ -22,6 +22,14 @@ function propertyDate(page, name) {
   return page?.properties?.[name]?.date?.start || null;
 }
 
+function propertyNumber(property) {
+  if (!property) return 0;
+  if (property.type === 'number') return Number(property.number) || 0;
+  if (property.type === 'formula') return Number(property.formula?.number ?? property.formula?.string) || 0;
+  if (property.type === 'rollup') return Number(property.rollup?.number) || 0;
+  return Number(plain(property).replace(/[^0-9,.-]/g, '').replace(/\./g, '').replace(',', '.')) || 0;
+}
+
 function localDate(iso) {
   if (!iso) return null;
   const date = new Date(iso);
@@ -124,14 +132,14 @@ function compactCreator(page) {
   const date = localDate(page.created_time);
   if (!date || isRenewal(page)) return null;
   const phase = plain(page.properties?.['Qual fase do agenciamento?']);
-  return { d: date, c: creatorChannel(plain(page.properties?.Origem)), r: creatorRank(phase), s: 'machine' };
+  return { d: date, c: creatorChannel(plain(page.properties?.Origem)), r: creatorRank(phase), g: propertyNumber(page.properties?.GMV), s: 'machine' };
 }
 
 function compactSniper(page) {
   const date = localDate(propertyDate(page, 'Data do primeiro Huggy') || page.created_time);
   if (!date || date < COVERAGE_FROM) return null;
   const phase = plain(page.properties?.['Status de contato']);
-  return { d: date, c: 'sniper', r: creatorRank(phase), s: 'sniper' };
+  return { d: date, c: 'sniper', r: creatorRank(phase), g: propertyNumber(page.properties?.GMV), s: 'sniper' };
 }
 
 function compactBrand(page) {
@@ -178,17 +186,17 @@ async function main() {
     coverage: { from: COVERAGE_FROM, to: localDate(new Date().toISOString()) },
     methodology: {
       cohort: 'Leads criados no periodo; etapas representam o estado atual desses mesmos leads.',
-      creators: 'Base Novos Creators + Leads Outbound/Sniper; renovacoes excluidas.',
+      creators: 'Base Novos Creators + Leads Outbound/Sniper; renovacoes excluidas. GMV e o valor atual registrado na coorte, nao o GMV gerado dentro do intervalo do filtro.',
       brands: 'Leads unicos do funil de vendas; testes e envios duplicados por WhatsApp sao removidos. Canal pago identificado por UTM. Etapas comerciais ficam vazias enquanto a fase nao for preenchida na fonte.',
     },
     creators: {
       rows: creators,
-      coverage: { stages: true, channel: true },
+      coverage: { stages: true, channel: true, gmv: true },
       sourceCounts: countBy(creators, 's'),
     },
     brands: {
       rows: brands,
-      coverage: { stages: brands.some((row) => row.r != null), channel: true },
+      coverage: { stages: brands.some((row) => row.r != null), channel: true, gmv: false },
       sourceCounts: countBy(brands, 's'),
       quality: {
         rawSubmissions: brandPages.length,
