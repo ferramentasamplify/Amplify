@@ -395,6 +395,18 @@ export default function HubView() {
         <div className="space-y-3">
           <h2 className="text-xs font-mono uppercase tracking-widest text-white/40 pt-2">Retenção</h2>
           <SectionCard
+            title="Gamificações"
+            icon="🎮"
+            href="/gamificacoes"
+            color="#25F4EE"
+            loading={false}
+          >
+            <MiniKpi label="Central" value="Live" color="#25F4EE" />
+            <MiniKpi label="Fonte" value="Notion" color="#fff" />
+            <MiniKpi label="Updates" value="Protegidos" color="#f59e0b" />
+          </SectionCard>
+
+          <SectionCard
             title="Amplify Club"
             icon="💎"
             href="/club"
@@ -427,6 +439,7 @@ export default function HubView() {
               { href: "/superafiliado",      label: "Super Afiliado", icon: "🤝" },
               { href: "/indiqueeganhe/login?next=/indiqueeganhe", label: "Indique e Ganhe", icon: "🎁" },
               { href: "/club",               label: "Amplify Club", icon: "💎" },
+              { href: "/gamificacoes",       label: "Gamificações", icon: "🎮" },
             ].map((t) => (
               <Link
                 key={t.href}
