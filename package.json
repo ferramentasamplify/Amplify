@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:gamifications": "node scripts/test-gamifications.mjs"
+    "test:gamifications": "node scripts/test-gamifications.mjs",
+    "test:growth-funnels": "node --test tests/growth-funnel-tree.test.mjs"
   },
   "dependencies": {
     "@notionhq/client": "^5.15.0",

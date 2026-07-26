@@ -1,11 +1,13 @@
 import { readFile } from 'node:fs/promises'
 import fallbackSnapshot from '@/data/growth-funnels-fallback.json'
+import { buildAudienceTree, buildMetaHierarchy } from '@/lib/growth-funnel-tree.mjs'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 export const runtime = 'nodejs'
 
 const LIVE_PATH = '/var/lib/amplify-hub/growth-funnels-live.json'
+const META_CREATIVE_PATH = '/root/.openclaw/workspaces/analista-trafego/creative-dashboard/data/ads.json'
 
 const SNIPER_STAGES = [
   { key: 'leads', label: 'Leads Sniper', rank: 0 },
@@ -99,7 +101,17 @@ function aggregate(snapshot, audience, from, to) {
     const connected = audience === 'brands' || channel.key === 'sniper'
       ? subset.filter((row) => row.x === true).length
       : null
-    return { ...channel, leads: subset.length, connected, stages }
+    const sellerLabels = [...new Set(subset.map((row) => typeof row.v === 'string' ? row.v.trim() : '').filter(Boolean))]
+    const sellers = sellerLabels.map((label) => {
+      const sellerRows = subset.filter((row) => typeof row.v === 'string' && row.v.trim() === label)
+      return {
+        key: label.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-'),
+        label,
+        leads: sellerRows.length,
+        stages: stageValues(sellerRows, channel.stages || config.stages, channel.rankField || 'r'),
+      }
+    })
+    return { ...channel, leads: subset.length, connected, stages, sellers }
   }).filter((channel) => channel.leads > 0 || channel.key === 'other')
 
   const financialGroups = audience === 'creators' && gmvAvailable
@@ -174,9 +186,27 @@ async function readSnapshot() {
   }
 }
 
+async function readMetaCreative() {
+  try {
+    const payload = JSON.parse(await readFile(META_CREATIVE_PATH, 'utf8'))
+    const generatedAt = payload.summary?.live_synced_at || payload.summary?.generated_at || null
+    const age = generatedAt ? Date.now() - new Date(generatedAt).getTime() : Number.POSITIVE_INFINITY
+    return {
+      ads: Array.isArray(payload.ads) ? payload.ads : [],
+      source: 'Meta Ads / creative',
+      reference: payload.summary?.source_window === 'today' ? 'Hoje na última sincronização Meta' : 'Snapshot Meta',
+      generatedAt,
+      stale: !Number.isFinite(age) || age > 36 * 60 * 60 * 1000,
+      error: payload.summary?.live_sync_error || null,
+    }
+  } catch (error) {
+    return { ads: [], source: 'Meta Ads / creative', reference: null, generatedAt: null, stale: true, error: error.message }
+  }
+}
+
 export async function GET(request) {
   try {
-    const { snapshot, source, liveError } = await readSnapshot()
+    const [{ snapshot, source, liveError }, meta] = await Promise.all([readSnapshot(), readMetaCreative()])
     const url = new URL(request.url)
     const coverageFrom = snapshot.coverage?.from || '2026-07-01'
     const coverageTo = snapshot.coverage?.to || new Date().toISOString().slice(0, 10)
@@ -188,6 +218,19 @@ export async function GET(request) {
 
     const creators = aggregate(snapshot, 'creators', from, to)
     const brands = aggregate(snapshot, 'brands', from, to)
+    const metaReference = meta.generatedAt
+      ? `${meta.reference} · ${new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo' }).format(new Date(meta.generatedAt))}`
+      : meta.reference
+    const hierarchy = {
+      creators: buildAudienceTree(creators, {
+        paidChildren: buildMetaHierarchy(meta.ads, 'creators', { reference: metaReference }),
+        reference: `${from} a ${to}`,
+      }),
+      brands: buildAudienceTree(brands, {
+        paidChildren: buildMetaHierarchy(meta.ads, 'brands', { reference: metaReference }),
+        reference: `${from} a ${to}`,
+      }),
+    }
     return Response.json({
       generatedAt: snapshot.generatedAt,
       timezone: snapshot.timezone,
@@ -198,11 +241,19 @@ export async function GET(request) {
       range: { from, to },
       methodology: snapshot.methodology,
       sources: snapshot.sources || {},
+      metaSource: {
+        source: meta.source,
+        generatedAt: meta.generatedAt,
+        reference: metaReference,
+        stale: meta.stale,
+        error: meta.error,
+      },
       summary: {
         creators: creators.totals,
         brands: brands.totals,
       },
       audiences: { creators, brands },
+      hierarchy,
     }, { headers: { 'Cache-Control': 'no-store, max-age=0' } })
   } catch (error) {
     return Response.json({ error: `Nao foi possivel carregar os funis: ${error.message}` }, { status: 500 })
