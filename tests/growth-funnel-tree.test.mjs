@@ -36,6 +36,8 @@ test('arvore de audiencia nao inventa vendedor nem niveis sem fonte', () => {
   assert.equal(tree.children[1].children.length, 0)
   assert.equal(tree.children[1].metrics.mql, null)
   assert.equal(tree.metrics.converted, 3)
+  assert.equal(tree.metrics.conversion, 15)
+  assert.equal(tree.children[0].metrics.conversion, 2 / 12 * 100)
 })
 
 test('inclui vendedor somente quando a agregacao traz vendedor real', () => {
@@ -49,4 +51,5 @@ test('inclui vendedor somente quando a agregacao traz vendedor real', () => {
   const tree = buildAudienceTree(audience)
   assert.equal(tree.children[0].children[0].type, 'seller')
   assert.equal(tree.children[0].children[0].metrics.converted, 1)
+  assert.equal(tree.children[0].children[0].metrics.conversion, 25)
 })
