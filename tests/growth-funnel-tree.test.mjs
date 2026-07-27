@@ -42,7 +42,7 @@ test('arvore de audiencia nao inventa vendedor nem niveis sem fonte', () => {
   assert.equal(tree.children[0].metrics.conversion, 2 / 12 * 100)
   assert.equal(tree.children[0].metrics.costPerLead, 12.5)
   assert.equal(tree.children[0].metrics.costLeadBasis, 12)
-  assert.equal(tree.children[0].metrics.costPerSale, null)
+  assert.equal(tree.children[0].metrics.costPerSale, 75)
 })
 
 test('inclui vendedor somente quando a agregacao traz vendedor real', () => {
