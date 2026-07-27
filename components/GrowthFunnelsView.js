@@ -7,6 +7,7 @@ const fmtPct = (value) => value == null ? "—" : `${Number(value).toFixed(value
 const fmtMoney = (value) => value == null ? "—" : new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", notation: "compact", maximumFractionDigits: 1 }).format(Number(value));
 const iso = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 const shift = (days) => { const date = new Date(); date.setDate(date.getDate() + days); return iso(date); };
+const shiftFrom = (base, days) => { const date = new Date(`${base}T12:00:00`); date.setDate(date.getDate() + days); return iso(date); };
 
 const TONES = {
   violet: "#9B8CFF", pink: "#FF6FAE", cyan: "#37D7D0", amber: "#F6B84B",
@@ -213,11 +214,12 @@ export default function GrowthFunnelsView() {
   }, [load]);
 
   function applyPreset(key) {
+    const coverageTo = data?.coverage?.to || shift(0);
     setPreset(key);
-    if (key === "7d") setFrom(shift(-6));
-    if (key === "30d") setFrom(shift(-29));
+    if (key === "7d") setFrom(shiftFrom(coverageTo, -6));
+    if (key === "30d") setFrom(shiftFrom(coverageTo, -29));
     if (key === "q3") setFrom("2026-07-01");
-    setTo(shift(0));
+    setTo(coverageTo);
   }
 
   const audiences = data?.audiences || {};

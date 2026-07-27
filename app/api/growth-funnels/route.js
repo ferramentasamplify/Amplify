@@ -7,7 +7,8 @@ export const revalidate = 0
 export const runtime = 'nodejs'
 
 const LIVE_PATH = '/var/lib/amplify-hub/growth-funnels-live.json'
-const META_CREATIVE_PATH = '/root/.openclaw/workspaces/analista-trafego/creative-dashboard/data/ads.json'
+const META_ENV_PATH = '/root/.openclaw/workspaces/analista-trafego/.env'
+const META_API_VERSION = 'v19.0'
 
 const SNIPER_STAGES = [
   { key: 'leads', label: 'Leads Sniper', rank: 0 },
@@ -186,27 +187,69 @@ async function readSnapshot() {
   }
 }
 
-async function readMetaCreative() {
+function parseEnvFile(contents) {
+  return Object.fromEntries(contents.split(/\r?\n/).map((line) => line.trim()).filter((line) => line && !line.startsWith('#') && line.includes('=')).map((line) => {
+    const separator = line.indexOf('=')
+    return [line.slice(0, separator).trim(), line.slice(separator + 1).trim()]
+  }))
+}
+
+function metaResultValue(results) {
+  if (!Array.isArray(results)) return null
+  const values = results.flatMap((result) => Array.isArray(result.values) ? result.values : [])
+  if (!values.length) return null
+  return values.reduce((total, item) => total + (Number(item.value) || 0), 0)
+}
+
+async function readMetaRange(from, to) {
   try {
-    const payload = JSON.parse(await readFile(META_CREATIVE_PATH, 'utf8'))
-    const generatedAt = payload.summary?.live_synced_at || payload.summary?.generated_at || null
-    const age = generatedAt ? Date.now() - new Date(generatedAt).getTime() : Number.POSITIVE_INFINITY
+    const env = parseEnvFile(await readFile(META_ENV_PATH, 'utf8'))
+    if (!env.META_ACCESS_TOKEN || !env.META_AD_ACCOUNT_ID) throw new Error('credenciais Meta não configuradas')
+    const params = new URLSearchParams({
+      access_token: env.META_ACCESS_TOKEN,
+      fields: 'ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,spend,results',
+      time_range: JSON.stringify({ since: from, until: to }),
+      level: 'ad',
+      limit: '500',
+    })
+    let next = `https://graph.facebook.com/${META_API_VERSION}/${env.META_AD_ACCOUNT_ID}/insights?${params}`
+    const rows = []
+    for (let page = 0; next && page < 5; page += 1) {
+      const response = await fetch(next, { cache: 'no-store' })
+      if (!response.ok) throw new Error(`Meta Graph respondeu ${response.status}`)
+      const payload = await response.json()
+      rows.push(...(Array.isArray(payload.data) ? payload.data : []))
+      next = payload.paging?.next || null
+    }
+    const ads = rows.map((row) => ({
+      id: row.ad_id,
+      name: row.ad_name,
+      campaign: row.campaign_name,
+      campaign_id: row.campaign_id,
+      adset: row.adset_name,
+      adset_id: row.adset_id,
+      segment: /marcas?/i.test(row.campaign_name || '') ? 'brand' : 'creator',
+      recent: {
+        spend: Number(row.spend) || 0,
+        results: metaResultValue(row.results),
+      },
+    })).filter((ad) => ad.recent.spend > 0 || (ad.recent.results || 0) > 0)
     return {
-      ads: Array.isArray(payload.ads) ? payload.ads : [],
-      source: 'Meta Ads / creative',
-      reference: payload.summary?.source_window === 'today' ? 'Hoje na última sincronização Meta' : 'Snapshot Meta',
-      generatedAt,
-      stale: !Number.isFinite(age) || age > 36 * 60 * 60 * 1000,
-      error: payload.summary?.live_sync_error || null,
+      ads,
+      source: 'Meta Ads ao vivo',
+      reference: `${from} a ${to}`,
+      generatedAt: new Date().toISOString(),
+      stale: false,
+      error: null,
     }
   } catch (error) {
-    return { ads: [], source: 'Meta Ads / creative', reference: null, generatedAt: null, stale: true, error: error.message }
+    return { ads: [], source: 'Meta Ads ao vivo', reference: `${from} a ${to}`, generatedAt: null, stale: true, error: error.message }
   }
 }
 
 export async function GET(request) {
   try {
-    const [{ snapshot, source, liveError }, meta] = await Promise.all([readSnapshot(), readMetaCreative()])
+    const { snapshot, source, liveError } = await readSnapshot()
     const url = new URL(request.url)
     const coverageFrom = snapshot.coverage?.from || '2026-07-01'
     const coverageTo = snapshot.coverage?.to || new Date().toISOString().slice(0, 10)
@@ -216,6 +259,7 @@ export async function GET(request) {
     if (to > coverageTo) to = coverageTo
     if (from > to) [from, to] = [to, from]
 
+    const meta = await readMetaRange(from, to)
     const creators = aggregate(snapshot, 'creators', from, to)
     const brands = aggregate(snapshot, 'brands', from, to)
     const metaReference = meta.generatedAt
