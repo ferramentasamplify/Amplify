@@ -15,6 +15,8 @@ test('Meta cria apenas niveis reais campanha > conjunto > anuncio e separa audie
   assert.equal(creators[0].children[0].children.length, 2)
   assert.equal(creators[0].metrics.investment, 150)
   assert.equal(creators[0].metrics.leads, 12)
+  assert.equal(creators[0].metrics.costPerLead, 12.5)
+  assert.equal(creators[0].metrics.costPerSale, null)
   assert.equal(creators[0].metrics.mql, null)
   assert.equal(brands[0].label, 'Campanha Marca')
   assert.equal(brands[0].metrics.investment, 75)
@@ -38,6 +40,9 @@ test('arvore de audiencia nao inventa vendedor nem niveis sem fonte', () => {
   assert.equal(tree.metrics.converted, 3)
   assert.equal(tree.metrics.conversion, 15)
   assert.equal(tree.children[0].metrics.conversion, 2 / 12 * 100)
+  assert.equal(tree.children[0].metrics.costPerLead, 12.5)
+  assert.equal(tree.children[0].metrics.costLeadBasis, 12)
+  assert.equal(tree.children[0].metrics.costPerSale, null)
 })
 
 test('inclui vendedor somente quando a agregacao traz vendedor real', () => {
