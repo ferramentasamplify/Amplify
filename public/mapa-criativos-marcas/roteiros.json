@@ -1,0 +1,141 @@
+{
+  "updatedAt": "2026-07-28T16:45:00-03:00",
+  "project": "Novo Funil Marcas",
+  "version": 1,
+  "stages": [
+    {
+      "id": "p0",
+      "label": "P0",
+      "title": "Ainda nao conhece TikTok Shop",
+      "description": "Comecar por uma dor conhecida. Explicar o mecanismo antes de nomear TikTok Shop, creators ou Live Shop.",
+      "color": "cyan"
+    },
+    {
+      "id": "p1",
+      "label": "P1",
+      "title": "Conhece, mas ainda nao opera",
+      "description": "Transformar curiosidade em entendimento pratico: produto, margem, conteudo e distribuicao.",
+      "color": "amber"
+    },
+    {
+      "id": "p2",
+      "label": "P2",
+      "title": "Ja possui loja no canal",
+      "description": "Diagnosticar operacao, creators, videos, lives e pontos que impedem escala.",
+      "color": "red"
+    }
+  ],
+  "creatives": [
+    {
+      "id": "m01",
+      "code": "M01",
+      "stage": "p0",
+      "title": "Seu produto nao precisa ser procurado para ser vendido",
+      "angle": "Criacao de demanda",
+      "status": "Em roteiro",
+      "priority": "Alta",
+      "version": "v1",
+      "format": "Talking Head + produto em cena + B-roll de feed, demonstracao e compra. Master 4K com area segura para 9:16, 4:5 e 16:9.",
+      "objective": "Mostrar ao dono de marca que um canal de conteudo pode apresentar o produto, criar desejo e levar a compra, em vez de depender apenas de uma busca existente.",
+      "reason": "Evolucao do angulo do Mentoria 07, que gerou 5 leads a CPL de R$ 7,33 no primeiro dia.",
+      "reference": {
+        "label": "TikTok Shop Espana — descoberta e compra dentro do TikTok",
+        "url": "https://adlibrary.com/api/media?u=gt9s5jWRFfU-PTCDvCJM6obNQJJ810pM74fCX_Ok2MM0P83Y0hnKH2OfedgsBMoLNd9Ym2ZyUcGqA3KgaaoJ4d32OnnzQYqtZ84HnF1KuVo3PRcTkwXvvcpXzuzbiCIqMugnZdRNZw"
+      },
+      "hooks": [
+        {
+          "name": "Hook 1",
+          "visual": "Produto parado sobre uma mesa. Barra de pesquisa vazia na tela.",
+          "line": "Se ninguem pesquisar pelo nome do seu produto no marketplace, como um novo cliente vai descobri-lo?"
+        },
+        {
+          "name": "Hook 2",
+          "visual": "Pessoa demonstra o produto; a imagem evolui para descoberta, desejo e compra.",
+          "line": "E se um video pudesse apresentar seu produto, criar o desejo e levar o cliente ate a compra no mesmo lugar?"
+        },
+        {
+          "name": "Hook 3",
+          "visual": "Tela dividida: marketplace de um lado e feed de videos do outro.",
+          "line": "Marketplace captura quem ja quer comprar. Existe um novo canal onde o conteudo pode criar essa vontade."
+        }
+      ],
+      "cta": "Clique e conheca a aula que mostra como transformar conteudo em uma nova frente de vendas para a sua marca.",
+      "test": "Comparar dor da busca versus promessa de criacao de demanda. Medir hook, formulario, compra da aula e qualidade comercial.",
+      "notes": "Evitar abrir falando TikTok Shop. Primeiro tornar visivel o limite de depender da busca."
+    },
+    {
+      "id": "m02",
+      "code": "M02",
+      "stage": "p0",
+      "title": "O risco de depender de um unico marketplace",
+      "angle": "Risco de concentracao",
+      "status": "Em roteiro",
+      "priority": "Alta",
+      "version": "v1",
+      "format": "Talking Head + painel de vendas + alertas de mudanca de taxa e regra + comparacao entre canais. Master para 9:16, 4:5 e 16:9.",
+      "objective": "Atacar uma dor conhecida de marcas que ja vendem bem, mas concentram parte relevante do faturamento em um unico marketplace. Nao sugerir abandono: apresentar diversificacao.",
+      "reason": "Abre pela vulnerabilidade que o lojista ja entende e cria a ponte para uma nova fonte de demanda.",
+      "reference": {
+        "label": "TikTok Shop Espana — transformar comunidade em clientes",
+        "url": "https://adlibrary.com/api/media?u=G_4ACItX_0jVh36aGEBzcf-lPr-v7nKwZpGIzprXUId7prABNuKmHrL2ohwK4yM8Exmlrntf4u9ApKnGDu3CXFuYAJbeOWYsfKVZg-CVIg1G0_hqR3sRHuKcKIGj51Rdx0PRVB2nSA"
+      },
+      "hooks": [
+        {
+          "name": "Hook 1",
+          "visual": "Painel de vendas concentrado em um canal. Texto: QUANTO DA SUA RECEITA DEPENDE DISSO?",
+          "line": "Se o seu principal marketplace aumentar as taxas ou mudar as regras amanha, quanto da receita da sua marca fica exposta?"
+        },
+        {
+          "name": "Hook 2",
+          "visual": "Um unico canal se divide em marketplace, site, videos e vendas ao vivo.",
+          "line": "Sua marca nao precisa abandonar o canal que funciona. Precisa parar de depender exclusivamente dele."
+        },
+        {
+          "name": "Hook 3",
+          "visual": "Produto esperando uma busca; corte para varias pessoas demonstrando o mesmo item.",
+          "line": "Hoje voce vende para quem procura pelo produto. Mas existe uma nova forma de alcancar quem ainda nem sabia que queria compra-lo."
+        }
+      ],
+      "cta": "Clique e conheca a nova frente de vendas que esta sendo construida dentro do TikTok.",
+      "test": "Comparar medo de mudanca de regra versus promessa de diversificacao. Nao usar tom de catastrofe.",
+      "notes": "A tese e adicionar um canal, nao atacar Mercado Livre, Amazon ou outros marketplaces."
+    },
+    {
+      "id": "m03",
+      "code": "M03",
+      "stage": "p1",
+      "title": "R$ 260 mil em tres dias",
+      "angle": "Prova real + mecanismo",
+      "status": "Em roteiro",
+      "priority": "Alta",
+      "version": "v1",
+      "format": "Talking Head dentro da operacao + produtos + equipamentos + apresentador + equipe + tela de resultado. Master para 9:16, 4:5 e 16:9.",
+      "objective": "Dar prova concreta para o dono de marca que precisa ver uma operacao real antes de acreditar no canal. Mostrar que o resultado veio de um sistema, nao apenas de ligar uma camera.",
+      "reason": "Replica o padrao historicamente vencedor de Marcas: qualificacao direta, prova visual, numero real e explicacao do mecanismo.",
+      "reference": {
+        "label": "Amplify — operacao real de creators e Live Shop",
+        "url": "https://www.facebook.com/247335418464214/videos/1379483154284848/"
+      },
+      "hooks": [
+        {
+          "name": "Hook 1",
+          "visual": "Abrir na operacao real e mostrar o resultado na tela. Texto: R$ 260 MIL EM 3 DIAS.",
+          "line": "A Max Titanium faturou R$ 260 mil em tres dias vendendo ao vivo dentro do TikTok."
+        },
+        {
+          "name": "Hook 2",
+          "visual": "Mostrar produto, apresentador, oferta, equipe e equipamentos em cortes rapidos.",
+          "line": "Esse resultado nao veio apenas de ligar uma camera. Existia produto, oferta, conteudo e uma operacao preparada para vender."
+        },
+        {
+          "name": "Hook 3",
+          "visual": "Matheus entra no quadro enquanto a operacao continua acontecendo ao fundo.",
+          "line": "Existe uma area de compras dentro do TikTok onde o cliente assiste, conhece o produto e compra sem sair do aplicativo."
+        }
+      ],
+      "cta": "Clique e assista a aula para entender como esse modelo pode ser aplicado a realidade da sua marca.",
+      "test": "Testar numero primeiro versus mecanismo primeiro. O resultado precisa aparecer visualmente, nao apenas ser falado.",
+      "notes": "Validar autorizacao de uso do case e manter o periodo exato da prova na tela."
+    }
+  ]
+}
