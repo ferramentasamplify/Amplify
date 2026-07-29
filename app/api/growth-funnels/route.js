@@ -2,12 +2,14 @@ import { readFile } from 'node:fs/promises'
 import fallbackSnapshot from '@/data/growth-funnels-fallback.json'
 import { buildAudienceTree, buildMetaHierarchy } from '@/lib/growth-funnel-tree.mjs'
 import { buildNewBrandFunnel } from '@/lib/new-brand-funnel.mjs'
+import { aggregateTrackingEvents, loadTrackingEvents } from '@/lib/new-brand-funnel-events.mjs'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 export const runtime = 'nodejs'
 
 const LIVE_PATH = '/var/lib/amplify-hub/growth-funnels-live.json'
+const NEW_BRAND_EVENTS_PATH = '/var/lib/amplify-hub/new-brand-funnel-events.jsonl'
 const META_ENV_PATH = '/root/.openclaw/workspaces/analista-trafego/.env'
 const META_API_VERSION = 'v19.0'
 
@@ -276,7 +278,29 @@ export async function GET(request) {
         reference: `${from} a ${to}`,
       }),
     }
-    const newBrandFunnel = buildNewBrandFunnel({}, { reference: `${from} a ${to}` })
+    const newBrandPath = process.env.NEW_BRAND_FUNNEL_EVENTS_PATH || NEW_BRAND_EVENTS_PATH
+    const connectedEventNames = (process.env.NEW_BRAND_FUNNEL_CONNECTED_EVENTS || '')
+      .split(',').map((item) => item.trim()).filter(Boolean)
+    let trackingRead = { events: [], invalidLines: 0 }
+    let trackingReadError = null
+    try {
+      trackingRead = await loadTrackingEvents(newBrandPath)
+    } catch (error) {
+      trackingReadError = error instanceof Error ? error.message : 'falha ao ler eventos'
+    }
+    const trackingAggregate = aggregateTrackingEvents(trackingRead.events, { from, to, connectedEventNames })
+    const newBrandFunnel = {
+      ...buildNewBrandFunnel(trackingAggregate.values, { reference: `${from} a ${to}` }),
+      tracking: {
+        endpoint: '/api/new-brand-funnel/events',
+        receiverConfigured: Boolean(process.env.NEW_BRAND_FUNNEL_INGEST_TOKEN),
+        connectedEventNames: trackingAggregate.connectedEventNames,
+        acceptedEvents: trackingAggregate.acceptedEvents,
+        duplicateEvents: trackingAggregate.duplicateEvents,
+        invalidEvents: trackingAggregate.invalidEvents + trackingRead.invalidLines,
+        readError: trackingReadError,
+      },
+    }
     return Response.json({
       generatedAt: snapshot.generatedAt,
       timezone: snapshot.timezone,
