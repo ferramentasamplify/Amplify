@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { buildMetaHierarchy, buildAudienceTree } from '../lib/growth-funnel-tree.mjs'
+import { buildNewBrandFunnel, NEW_BRAND_FUNNEL_STAGES } from '../lib/new-brand-funnel.mjs'
 
 const ads = [
   { id: 'a1', name: 'Criativo A', campaign: 'Campanha Creator', adset: 'Conjunto 1', segment: 'creator', recent: { spend: 120, results: 12 } },
@@ -57,4 +58,34 @@ test('inclui vendedor somente quando a agregacao traz vendedor real', () => {
   assert.equal(tree.children[0].children[0].type, 'seller')
   assert.equal(tree.children[0].children[0].metrics.converted, 1)
   assert.equal(tree.children[0].children[0].metrics.conversion, 25)
+})
+
+test('novo funil de Marcas preserva as dez fases ate a Mentoria sem inventar zero', () => {
+  const funnel = buildNewBrandFunnel()
+  assert.equal(NEW_BRAND_FUNNEL_STAGES.length, 10)
+  assert.equal(funnel.stages[0].key, 'creative-view')
+  assert.equal(funnel.stages.at(-1).key, 'mentoring-sale')
+  assert.equal(funnel.state, 'blueprint')
+  assert.equal(funnel.connectedStages, 0)
+  assert.ok(funnel.stages.every((stage) => stage.value === null && stage.conversion === null))
+  assert.equal(funnel.totals.mentoringSales, null)
+})
+
+test('novo funil de Marcas calcula conversao adjacente e total', () => {
+  const funnel = buildNewBrandFunnel({
+    'creative-view': 1000,
+    'landing-view': 250,
+    'diagnostic-form': 100,
+    'sdr-form': 100,
+    'lesson-purchase': 40,
+    'sdr-purchase': 40,
+    'lesson-consumption': 30,
+    'mentoring-invite': 15,
+    'sdr-intent': 10,
+    'mentoring-sale': 2,
+  })
+  assert.equal(funnel.state, 'connected')
+  assert.equal(funnel.stages[1].conversion, 25)
+  assert.equal(funnel.stages.at(-1).conversion, 20)
+  assert.equal(funnel.totals.totalConversion, 0.2)
 })

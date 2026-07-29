@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import fallbackSnapshot from '@/data/growth-funnels-fallback.json'
 import { buildAudienceTree, buildMetaHierarchy } from '@/lib/growth-funnel-tree.mjs'
+import { buildNewBrandFunnel } from '@/lib/new-brand-funnel.mjs'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -275,6 +276,7 @@ export async function GET(request) {
         reference: `${from} a ${to}`,
       }),
     }
+    const newBrandFunnel = buildNewBrandFunnel({}, { reference: `${from} a ${to}` })
     return Response.json({
       generatedAt: snapshot.generatedAt,
       timezone: snapshot.timezone,
@@ -298,6 +300,7 @@ export async function GET(request) {
       },
       audiences: { creators, brands },
       hierarchy,
+      newBrandFunnel,
     }, { headers: { 'Cache-Control': 'no-store, max-age=0' } })
   } catch (error) {
     return Response.json({ error: `Nao foi possivel carregar os funis: ${error.message}` }, { status: 500 })
