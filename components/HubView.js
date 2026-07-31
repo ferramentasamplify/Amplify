@@ -2,9 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-
-// ─── Auth ─────────────────────────────────────────────────────
-const HUB_PASSWORD = process.env.NEXT_PUBLIC_HUB_PASSWORD || "amplify2025";
+import HubPortfolio from "@/components/HubPortfolio";
 
 // ─── Helpers ──────────────────────────────────────────────────
 const fmtBRL = (n) =>
@@ -74,47 +72,8 @@ function SectionCard({ title, icon, href, color, children, loading, error }) {
   );
 }
 
-// ─── Login ────────────────────────────────────────────────────
-function LoginScreen({ onLogin }) {
-  const [pw, setPw] = useState("");
-  const [err, setErr] = useState("");
-  const submit = (e) => {
-    e.preventDefault();
-    if (pw === HUB_PASSWORD) onLogin();
-    else setErr("Senha incorreta.");
-  };
-  return (
-    <div className="min-h-screen bg-[#0A0B12] flex items-center justify-center">
-      <div className="bg-[#14161F] border border-white/10 rounded-2xl p-8 w-full max-w-sm flex flex-col gap-5">
-        <div className="flex flex-col gap-1">
-          <span className="text-xs font-mono uppercase tracking-widest text-[#25F4EE]">Amplify UGC</span>
-          <h1 className="text-2xl font-extrabold text-white">Hub de Dashboards</h1>
-        </div>
-        <form onSubmit={submit} className="flex flex-col gap-3">
-          <input
-            type="password"
-            placeholder="Senha de acesso"
-            value={pw}
-            onChange={(e) => { setPw(e.target.value); setErr(""); }}
-            className="bg-[#0A0B12] border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-white/30 focus:outline-none focus:border-[#25F4EE]"
-            autoFocus
-          />
-          {err && <span className="text-red-400 text-xs">{err}</span>}
-          <button
-            type="submit"
-            className="bg-[#1742E6] text-white font-bold text-sm rounded-xl py-3 hover:bg-blue-500 transition-colors"
-          >
-            Entrar
-          </button>
-        </form>
-      </div>
-    </div>
-  );
-}
-
 // ─── Hub principal ─────────────────────────────────────────────
 export default function HubView() {
-  const [authed, setAuthed]     = useState(false);
   const [notionData, setNotion] = useState(null);
   const [saData,     setSa]     = useState(null);
   const [igData,     setIg]     = useState(null);
@@ -132,7 +91,6 @@ export default function HubView() {
   });
 
   const fetchAll = useCallback(async () => {
-    if (!authed) return;
     setLoading({ notion: true, sa: true, ig: true, club: true, meta: true });
     setErrors({});
 
@@ -161,20 +119,18 @@ export default function HubView() {
       });
 
     setLastUpdate(new Date());
-  }, [authed, dateRange]);
+  }, [dateRange]);
 
   useEffect(() => {
     const timer = setTimeout(fetchAll, 0);
     return () => clearTimeout(timer);
   }, [fetchAll]);
 
-  if (!authed) return <LoginScreen onLogin={() => setAuthed(true)} />;
-
   const notionT = notionData?.totals || notionData;
   const metaT   = metaData?.totals;
 
   return (
-    <div className="min-h-screen bg-[#0A0B12] text-white font-sans">
+    <div className="min-h-screen overflow-x-hidden bg-[#0A0B12] text-white font-sans">
       {/* Nav */}
       <nav className="border-b border-white/10 sticky top-0 z-20 bg-[#0A0B12]/95 backdrop-blur">
         <div className="max-w-screen-xl mx-auto px-4 flex items-center justify-between h-14">
@@ -207,12 +163,15 @@ export default function HubView() {
 
         {/* Header */}
         <div>
-          <p className="text-xs font-mono uppercase tracking-widest text-[#25F4EE] mb-1">Visão geral</p>
-          <h1 className="text-3xl font-extrabold tracking-tight">Hub de Dashboards</h1>
-          <p className="text-white/40 text-sm mt-1">Últimos 30 dias · todos os módulos</p>
+          <p className="text-xs font-mono uppercase tracking-widest text-[#25F4EE] mb-1">Entrada principal da empresa</p>
+          <h1 className="text-3xl font-extrabold tracking-tight sm:text-4xl">Hub da Amplify</h1>
+          <p className="max-w-3xl text-white/45 text-sm mt-2 leading-relaxed">Numeros da operacao e acesso direto a todos os dashboards, LPs, sistemas, ferramentas, projetos e fluxos.</p>
         </div>
 
-        {/* ── Top KPIs (resumão) ── */}
+        <div>
+          <p className="text-xs font-mono uppercase tracking-widest text-white/35 mb-3">Numeros da operacao</p>
+
+        {/* ── Top KPIs (resumao) ── */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[
             {
@@ -245,12 +204,21 @@ export default function HubView() {
               className="bg-[#14161F] border border-white/10 rounded-2xl p-5 flex flex-col gap-1"
             >
               <span className="text-[10px] font-mono uppercase tracking-widest text-white/40">{k.label}</span>
-              <span className="text-2xl font-extrabold tracking-tight" style={{ color: k.color }}>
+              <span className="whitespace-nowrap text-xl font-extrabold tracking-tight sm:text-2xl" style={{ color: k.color }}>
                 {k.value ?? "…"}
               </span>
               {k.sub && <span className="text-[10px] text-white/30">{k.sub}</span>}
             </div>
           ))}
+        </div>
+        </div>
+
+        <HubPortfolio />
+
+        <div className="border-t border-white/10 pt-6">
+          <p className="text-xs font-mono uppercase tracking-widest text-white/35">Leituras ao vivo</p>
+          <h2 className="mt-1 text-2xl font-extrabold">Resumo dos principais modulos</h2>
+          <p className="mt-2 text-sm text-white/40">Os numeros abaixo continuam atualizando pelas fontes atuais. Use os cards ou a navegacao completa acima para abrir cada visao.</p>
         </div>
 
         {/* ── AQUISIÇÃO ── */}
@@ -295,6 +263,19 @@ export default function HubView() {
               <MiniKpi label="Receita" value="10% comissao" color="#47D7A0" sub="usa Est. commission real da tabela" />
               <MiniKpi label="Retencao" value="Dia a dia" color="#39CFE2" sub="entrou, ficou, saiu e voltou" />
               <MiniKpi label="CAC" value="Coorte Meta" color="#F6B84B" sub="alocacao media, sem inventar custo individual" />
+            </SectionCard>
+
+            {/* Projetos e fluxos */}
+            <SectionCard
+              title="Projetos e Fluxos"
+              icon="⌁"
+              href="/hub/projetos"
+              color="#10b981"
+            >
+              <MiniKpi label="Fluxo pronto" value="Virada" color="#10b981" sub="Club GMV, Notion e Circle" />
+              <MiniKpi label="Formato" value="Visual" color="#25F4EE" sub="canvas estilo n8n" />
+              <MiniKpi label="Runs" value="Historico" color="#F6B84B" sub="ultima execucao e saude" />
+              <MiniKpi label="Guardrail" value="OK antes" color="#EA1A4E" sub="sem acao real sem aprovacao" />
             </SectionCard>
 
             {/* Dash Aquisição */}
@@ -450,6 +431,7 @@ export default function HubView() {
               { href: "/hub/funis",          label: "Funis Globais", icon: "⇢" },
               { href: "/hub/growth",         label: "Growth Central", icon: "🧭" },
               { href: "/hub/creator-economics", label: "CAC x LTV Creators", icon: "↗" },
+              { href: "/hub/projetos",       label: "Projetos e Fluxos", icon: "⌁" },
               { href: "/superafiliado",      label: "Super Afiliado", icon: "🤝" },
               { href: "/indiqueeganhe/login?next=/indiqueeganhe", label: "Indique e Ganhe", icon: "🎁" },
               { href: "/club",               label: "Amplify Club", icon: "💎" },

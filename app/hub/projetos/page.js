@@ -1,8 +1,8 @@
 import ProjectsFlowView from "@/components/ProjectsFlowView";
 
 export const metadata = {
-  title: "Hub de Projetos — Amplify Hub",
-  description: "Portfolio interno da Amplify com dashboards, LPs, sistemas, ferramentas e fluxos organizados por area.",
+  title: "Projetos e Fluxos — Amplify Hub",
+  description: "Central visual dos fluxos recorrentes da operacao de retencao.",
 };
 
 export default function ProjectsFlowPage() {

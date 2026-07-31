@@ -3,225 +3,6 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 
-const portfolioAreas = [
-  { id: "all", label: "Tudo", description: "Todas as entregas da empresa" },
-  { id: "aquisicao", label: "Aquisicao", description: "Creators, CAC, operacao e time" },
-  { id: "growth", label: "Growth", description: "Funis, ofertas, LPs e novos canais" },
-  { id: "marketing", label: "Marketing e Trafego", description: "Meta Ads, criativos e inteligencia" },
-  { id: "retencao", label: "Retencao", description: "Club, creators, afiliados e recorrencia" },
-  { id: "vendas", label: "Vendas e Parcerias", description: "Propostas e operacao comercial" },
-  { id: "produto", label: "Projetos e Produto", description: "Sistemas internos, hubs e ferramentas" },
-];
-
-const portfolioItems = [
-  {
-    id: "cockpit-aquisicao",
-    area: "aquisicao",
-    title: "Cockpit de Aquisicao",
-    kind: "Sistema operacional",
-    description: "Kanban do time, prazos, bloqueios e historico conectado ao Slack #area-aquisicao.",
-    status: "operacional",
-    href: "https://amplify-mission-control.netlify.app/aquisicao",
-  },
-  {
-    id: "creator-economics",
-    area: "aquisicao",
-    title: "Creator CAC x LTV",
-    kind: "Dashboard",
-    description: "Cruza aquisicao, sistemas de entrada, GMV, receita, CAC e retencao por creator.",
-    status: "publicado",
-    href: "/hub/creator-economics",
-  },
-  {
-    id: "growth-central",
-    area: "growth",
-    title: "Growth Central",
-    kind: "Dashboard executivo",
-    description: "Plano, prioridades, indicadores e frentes de Growth em uma unica leitura.",
-    status: "publicado",
-    href: "/hub/growth",
-  },
-  {
-    id: "funis-globais",
-    area: "growth",
-    title: "Funis de Creators e Marcas",
-    kind: "Dashboard",
-    description: "Funis separados por publico, canais e etapas com conexao Notion, Bitrix e Meta.",
-    status: "publicado",
-    href: "/hub/funis",
-  },
-  {
-    id: "novo-funil-marcas",
-    area: "growth",
-    title: "Projeto Novo Funil de Marcas",
-    kind: "Projeto + banco criativo",
-    description: "Jornada, estrategia, criativos, referencias e plano de implementacao do novo funil.",
-    status: "em integracao",
-    href: "https://lp.amplifyugc.co/projeto-novo-funil-marcas/",
-  },
-  {
-    id: "aula-tiktok-shop",
-    area: "growth",
-    title: "LP Curso TikTok Shop",
-    kind: "Landing page",
-    description: "Pagina educacional para marcas que ainda nao dominam TikTok Shop e creators.",
-    status: "publicado",
-    href: "https://lp.amplifyugc.co/aula-tiktok-shop/",
-  },
-  {
-    id: "central-lps",
-    area: "growth",
-    title: "Central de LPs",
-    kind: "Biblioteca de paginas",
-    description: "Comparacao das versoes de LP de mentoria, curso e ofertas antes da escolha oficial.",
-    status: "em revisao",
-    href: "https://lp.amplifyugc.co/central-lps/",
-  },
-  {
-    id: "mentoria-marcas",
-    area: "growth",
-    title: "Mentoria para Marcas",
-    kind: "Oferta + landing pages",
-    description: "Posicionamento, argumento comercial e paginas da mentoria para marcas no TikTok Shop.",
-    status: "em revisao",
-    href: "https://lp.amplifyugc.co/central-lps/",
-  },
-  {
-    id: "amplify-os",
-    area: "produto",
-    title: "Amplify OS",
-    kind: "Sistema interno",
-    description: "Projeto para centralizar processos, ferramentas, agentes, ownership e acessos da empresa.",
-    status: "em estruturacao",
-  },
-  {
-    id: "creative-dashboard",
-    area: "marketing",
-    title: "Dashboard de Criativos Meta",
-    kind: "Dashboard operacional",
-    description: "Leitura por criativo com video, gasto, leads, CPL, Hook Rate, Hold Rate e decisao.",
-    status: "publicado",
-    href: "https://amplify-creative-dashboard.netlify.app",
-  },
-  {
-    id: "meta-hub",
-    area: "marketing",
-    title: "Meta Ads no Hub",
-    kind: "Dashboard integrado",
-    description: "Visao de campanhas e criativos dentro do Hub, usando dados e snapshots do OpenClaw.",
-    status: "publicado",
-    href: "/meta",
-  },
-  {
-    id: "mapa-criativos-marcas",
-    area: "marketing",
-    title: "Mapa de Criativos de Marcas",
-    kind: "Mapa estrategico",
-    description: "Hooks, roteiros, referencias e conexao entre estrategia e performance para Marcas.",
-    status: "publicado",
-    href: "/mapa-criativos-marcas",
-  },
-  {
-    id: "baw-intelligence",
-    area: "marketing",
-    title: "BAW TikTok Intelligence",
-    kind: "Dashboard + plano GMV Max",
-    description: "Auditoria de Product e LIVE GMV Max, produtos, criativos, budget e gates de decisao.",
-    status: "aguardando insumos",
-    href: "https://baw-tiktok-intelligence.netlify.app",
-  },
-  {
-    id: "club",
-    area: "retencao",
-    title: "Amplify Club",
-    kind: "Dashboard",
-    description: "GMV, categorias, elegibilidade e leitura da operacao recorrente do Club.",
-    status: "operacional",
-    href: "/club",
-  },
-  {
-    id: "virada-club-catalog",
-    area: "retencao",
-    title: "Virada do Club",
-    kind: "Fluxo automatizado",
-    description: "Fechamento mensal com Partner Center, Notion, Circle, dry-run e relatorio auditavel.",
-    status: "operacional",
-    flowId: "virada-club",
-  },
-  {
-    id: "indique-ganhe",
-    area: "retencao",
-    title: "Indique e Ganhe",
-    kind: "Dashboard",
-    description: "Acompanhamento do programa, creators, conversao e resultado.",
-    status: "publicado",
-    href: "/indiqueeganhe",
-  },
-  {
-    id: "super-afiliado",
-    area: "retencao",
-    title: "Super Afiliado",
-    kind: "Dashboard",
-    description: "Leitura do programa, cadastros, creators, vendas e GMV atribuivel.",
-    status: "publicado",
-    href: "/superafiliado/dashboard",
-  },
-  {
-    id: "retencao-data",
-    area: "retencao",
-    title: "Base e Dashboard de Retencao",
-    kind: "Pipeline de dados",
-    description: "Snapshots TikTok Shop e leituras de creators, produtos, videos e lives no Hub.",
-    status: "operacional",
-    flowId: "dashboard-retencao",
-  },
-  {
-    id: "proposta-laiz",
-    area: "vendas",
-    title: "Proposta Comercial Laiz",
-    kind: "Proposta interativa",
-    description: "Experiencia comercial publicada para apresentar o modelo de parceria e a oferta.",
-    status: "publicado",
-    href: "https://proposta-laiz-amplify.vercel.app",
-  },
-  {
-    id: "mission-control-company",
-    area: "produto",
-    title: "Mission Control da Amplify",
-    kind: "Sistema interno",
-    description: "Visao executiva, KRs, operacao, agentes e Cockpit de Aquisicao da empresa.",
-    status: "operacional",
-    href: "https://amplify-mission-control.netlify.app",
-  },
-  {
-    id: "amplify-hub",
-    area: "produto",
-    title: "Amplify Hub",
-    kind: "Hub de dashboards",
-    description: "Entrada central para dashboards, indicadores, funis, projetos e ferramentas da empresa.",
-    status: "operacional",
-    href: "/hub",
-  },
-  {
-    id: "margem-shop",
-    area: "produto",
-    title: "Calculadora de Margem TikTok Shop",
-    kind: "Ferramenta",
-    description: "Compara lucro, margem e ROAS minimo do TikTok Shop com o e-commerce.",
-    status: "publicado",
-    href: "https://amplify-margem-shop.netlify.app",
-  },
-];
-
-const statusTone = {
-  operacional: "good",
-  publicado: "good",
-  "em integracao": "warn",
-  "em revisao": "warn",
-  "em estruturacao": "blue",
-  "aguardando insumos": "warn",
-};
-
 const projects = [
   {
     id: "virada-club",
@@ -713,50 +494,9 @@ function SourceItem({ item }) {
   );
 }
 
-function PortfolioCard({ item, onOpenFlow }) {
-  const body = (
-    <>
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-[10px] font-mono uppercase tracking-[.16em] text-white/35">{item.kind}</p>
-          <h3 className="mt-2 text-lg font-extrabold text-white">{item.title}</h3>
-        </div>
-        <Chip tone={statusTone[item.status] || "neutral"}>{item.status}</Chip>
-      </div>
-      <p className="mt-3 text-sm leading-relaxed text-white/48">{item.description}</p>
-      <div className="mt-5 flex items-center justify-between border-t border-white/10 pt-3 text-xs font-bold">
-        <span className="text-white/35">{item.href ? "Abrir entrega" : item.flowId ? "Ver fluxo detalhado" : "Projeto registrado"}</span>
-        <span className="text-[#25F4EE]">{item.href || item.flowId ? "Abrir →" : "Sem link"}</span>
-      </div>
-    </>
-  );
-  const className = "block h-full rounded-xl border border-white/10 bg-[#14161F] p-5 text-left transition-all hover:-translate-y-0.5 hover:border-[#25F4EE]/45 hover:bg-[#181B25]";
-
-  if (item.flowId) {
-    return <button type="button" onClick={() => onOpenFlow(item.flowId)} className={className}>{body}</button>;
-  }
-  if (item.href) {
-    const external = item.href.startsWith("http");
-    return <a href={item.href} target={external ? "_blank" : undefined} rel={external ? "noreferrer" : undefined} className={className}>{body}</a>;
-  }
-  return <article className={`${className} opacity-80`}>{body}</article>;
-}
-
 export default function ProjectsFlowView() {
   const [activeId, setActiveId] = useState("virada-club");
-  const [portfolioArea, setPortfolioArea] = useState("all");
-  const [portfolioQuery, setPortfolioQuery] = useState("");
   const [selectedRunByProject, setSelectedRunByProject] = useState({});
-  const normalizedQuery = portfolioQuery.trim().toLocaleLowerCase("pt-BR");
-  const visiblePortfolio = useMemo(() => portfolioItems.filter((item) => {
-    const areaMatch = portfolioArea === "all" || item.area === portfolioArea;
-    const queryMatch = !normalizedQuery || `${item.title} ${item.kind} ${item.description} ${item.status}`.toLocaleLowerCase("pt-BR").includes(normalizedQuery);
-    return areaMatch && queryMatch;
-  }), [portfolioArea, normalizedQuery]);
-  const areaCounts = useMemo(() => Object.fromEntries(portfolioAreas.map((area) => [
-    area.id,
-    area.id === "all" ? portfolioItems.length : portfolioItems.filter((item) => item.area === area.id).length,
-  ])), []);
   const active = useMemo(() => projects.find((project) => project.id === activeId) || projects[0], [activeId]);
   const selectedRunId = selectedRunByProject[active.id] || active.runs[0]?.id || `${active.runs[0]?.date}-${active.runs[0]?.mode}`;
   const selectedRun = active.runs.find((run) => (run.id || `${run.date}-${run.mode}`) === selectedRunId) || active.runs[0];
@@ -769,14 +509,14 @@ export default function ProjectsFlowView() {
   };
 
   return (
-    <main className="min-h-screen overflow-x-hidden bg-[#0A0B12] text-white">
+    <main className="min-h-screen bg-[#0A0B12] text-white">
       <div className="mx-auto max-w-screen-xl px-4 py-8">
         <div className="flex flex-col gap-4 border-b border-white/10 pb-6 md:flex-row md:items-end md:justify-between">
           <div>
-            <p className="mb-2 text-xs font-mono uppercase tracking-widest text-[#25F4EE]">Amplify Hub · Portfolio interno</p>
-            <h1 className="text-3xl font-extrabold tracking-tight md:text-5xl">Hub de projetos</h1>
+            <p className="mb-2 text-xs font-mono uppercase tracking-widest text-[#25F4EE]">Hub Retencao</p>
+            <h1 className="text-3xl font-extrabold tracking-tight md:text-5xl">Projetos e fluxos</h1>
             <p className="mt-3 max-w-3xl text-sm leading-relaxed text-white/45">
-              Tudo que ja foi construido para a Amplify, organizado por area. Abra dashboards, LPs, ferramentas, sistemas e fluxos sem precisar procurar em conversas ou servidores.
+              Central visual dos projetos recorrentes: o que dispara, quais ferramentas entram, qual racional eu sigo no backend e qual output precisa sair.
             </p>
           </div>
           <Link href="/hub" className="rounded-lg bg-white/5 px-4 py-2 text-sm text-white/60 transition-colors hover:bg-white/10 hover:text-white">
@@ -784,86 +524,7 @@ export default function ProjectsFlowView() {
           </Link>
         </div>
 
-        <section className="py-6" aria-labelledby="portfolio-title">
-          <div className="grid gap-3 md:grid-cols-3">
-            <div className="rounded-xl border border-[#25F4EE]/20 bg-[#25F4EE]/5 p-5">
-              <p className="text-[10px] font-mono uppercase tracking-widest text-[#25F4EE]">Entregas mapeadas</p>
-              <p className="mt-2 text-4xl font-black">{portfolioItems.length}</p>
-            </div>
-            <div className="rounded-xl border border-white/10 bg-[#14161F] p-5">
-              <p className="text-[10px] font-mono uppercase tracking-widest text-white/35">Areas</p>
-              <p className="mt-2 text-4xl font-black">{portfolioAreas.length - 1}</p>
-            </div>
-            <div className="rounded-xl border border-white/10 bg-[#14161F] p-5">
-              <p className="text-[10px] font-mono uppercase tracking-widest text-white/35">Publicados / operacionais</p>
-              <p className="mt-2 text-4xl font-black">{portfolioItems.filter((item) => ["publicado", "operacional"].includes(item.status)).length}</p>
-            </div>
-          </div>
-
-          <div className="mt-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-            <div>
-              <p className="text-xs font-mono uppercase tracking-widest text-white/35">Portfolio da empresa</p>
-              <h2 id="portfolio-title" className="mt-1 text-2xl font-extrabold">Dashboards, LPs, sistemas e ferramentas</h2>
-            </div>
-            <label className="block w-full lg:max-w-sm">
-              <span className="sr-only">Buscar no Hub de projetos</span>
-              <input
-                type="search"
-                value={portfolioQuery}
-                onChange={(event) => setPortfolioQuery(event.target.value)}
-                placeholder="Buscar projeto, dashboard, LP..."
-                className="min-h-11 w-full rounded-lg border border-white/10 bg-[#14161F] px-4 text-sm text-white outline-none placeholder:text-white/30 focus:border-[#25F4EE]/60"
-              />
-            </label>
-          </div>
-
-          <div className="mt-4 flex gap-2 overflow-x-auto pb-2" aria-label="Filtrar por area">
-            {portfolioAreas.map((area) => (
-              <button
-                key={area.id}
-                type="button"
-                onClick={() => setPortfolioArea(area.id)}
-                aria-pressed={portfolioArea === area.id}
-                className={`min-h-11 shrink-0 rounded-lg border px-4 text-left text-sm font-bold transition-colors ${
-                  portfolioArea === area.id
-                    ? "border-[#25F4EE]/60 bg-[#25F4EE]/10 text-[#25F4EE]"
-                    : "border-white/10 bg-[#14161F] text-white/55 hover:border-white/25 hover:text-white"
-                }`}
-                title={area.description}
-              >
-                {area.label} <span className="ml-1 text-xs opacity-60">{areaCounts[area.id]}</span>
-              </button>
-            ))}
-          </div>
-
-          <p className="mt-2 text-xs text-white/35">{visiblePortfolio.length} itens nesta leitura</p>
-          <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {visiblePortfolio.map((item) => (
-              <PortfolioCard
-                key={item.id}
-                item={item}
-                onOpenFlow={(flowId) => {
-                  setActiveId(flowId);
-                  window.setTimeout(() => document.getElementById("fluxos-operacionais")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
-                }}
-              />
-            ))}
-          </div>
-          {!visiblePortfolio.length && (
-            <div className="mt-4 rounded-xl border border-dashed border-white/15 p-8 text-center text-sm text-white/40">
-              Nenhuma entrega encontrada com este filtro.
-            </div>
-          )}
-        </section>
-
-        <section id="fluxos-operacionais" className="scroll-mt-4 border-t border-white/10 pt-7">
-          <div className="mb-5">
-            <p className="text-xs font-mono uppercase tracking-widest text-[#25F4EE]">Operacao recorrente</p>
-            <h2 className="mt-1 text-2xl font-extrabold">Fluxos detalhados</h2>
-            <p className="mt-2 max-w-3xl text-sm leading-relaxed text-white/45">Racional, fontes, runs e controles dos projetos que possuem automacao ou rotina recorrente.</p>
-          </div>
-
-        <div className="grid min-w-0 gap-5 pb-6 lg:grid-cols-[360px_1fr]">
+        <div className="grid min-w-0 gap-5 py-6 lg:grid-cols-[360px_1fr]">
           <aside className="min-w-0 space-y-3">
             {projects.map((project) => (
               <ProjectCard
@@ -991,7 +652,6 @@ export default function ProjectsFlowView() {
             </div>
           </div>
         </div>
-        </section>
       </div>
     </main>
   );
