@@ -5,10 +5,14 @@ REPO="/root/.openclaw/workspaces/retencao-gabriel/amplify-hub"
 SOURCE="$REPO/scripts/build-growth-funnels.js"
 ECON_ACQ_SOURCE="$REPO/scripts/build-creator-economics-acquisition.js"
 ECON_SOURCE="$REPO/scripts/build-creator-economics.js"
+AMPLIFYOS_SQL="$REPO/scripts/amplifyos-creator-acquisition.sql"
+AMPLIFYOS_BACKEND="/root/work/Amplify-OS/AmplifyOS/backend"
 STATE_DIR="/var/lib/amplify-hub"
 DEST="$STATE_DIR/growth-funnels-live.json"
 ECON_ACQ_DEST="$STATE_DIR/creator-economics-acquisition.json"
+AMPLIFYOS_DEST="$STATE_DIR/amplifyos-creator-acquisition.json"
 ECON_DEST="$STATE_DIR/creator-economics-live.json"
+AMPLIFYOS_TMP="$(mktemp)"
 CID="$(docker ps --filter name=n8n_n8n --format '{{.ID}}' | python3 -c 'import sys; print(sys.stdin.readline().strip())')"
 
 if [[ -z "$CID" ]]; then
@@ -18,7 +22,7 @@ fi
 
 cleanup() {
   docker exec -u 0 "$CID" rm -f /tmp/build-growth-funnels.js /tmp/build-creator-economics-acquisition.js /tmp/growth-funnels-live.json /tmp/creator-economics-acquisition.json /tmp/creds.json /tmp/bitrix-workflow.json /tmp/export.log >/dev/null 2>&1 || true
-  rm -f "$DEST.tmp" "$ECON_ACQ_DEST.tmp" "$ECON_DEST.tmp"
+  rm -f "$DEST.tmp" "$ECON_ACQ_DEST.tmp" "$AMPLIFYOS_DEST.tmp" "$ECON_DEST.tmp" "$AMPLIFYOS_TMP"
 }
 trap cleanup EXIT
 
@@ -32,14 +36,30 @@ docker cp "$CID":/tmp/growth-funnels-live.json "$DEST.tmp" >/dev/null
 docker cp "$CID":/tmp/creator-economics-acquisition.json "$ECON_ACQ_DEST.tmp" >/dev/null
 chmod 644 "$DEST.tmp" "$ECON_ACQ_DEST.tmp"
 
+(
+  cd "$AMPLIFYOS_BACKEND"
+  railway run --service Back-End bash -lc 'psql "$DATABASE_URL" -X -qAt -f /root/.openclaw/workspaces/retencao-gabriel/amplify-hub/scripts/amplifyos-creator-acquisition.sql'
+) > "$AMPLIFYOS_TMP"
+python3 - "$AMPLIFYOS_TMP" <<'PY'
+import json, sys
+payload = json.load(open(sys.argv[1]))
+coverage = payload.get('coverage') or {}
+if payload.get('source') != 'AmplifyOS.criadores native cutover' or not isinstance(payload.get('rows'), list) or coverage.get('uniqueHandles', 0) < 1:
+    raise SystemExit('invalid AmplifyOS creator acquisition snapshot')
+PY
+cp -f "$AMPLIFYOS_TMP" "$AMPLIFYOS_DEST.tmp"
+chmod 644 "$AMPLIFYOS_DEST.tmp"
+
 TIKTOK_REPORTS_DIR="$REPO/data/tiktok-shop-reports/downloads" \
 CREATOR_ECONOMICS_ACQUISITION="$ECON_ACQ_DEST.tmp" \
+AMPLIFYOS_CREATOR_ACQUISITION="$AMPLIFYOS_DEST.tmp" \
 CREATOR_ECONOMICS_OUTPUT="$ECON_DEST.tmp" \
 node "$ECON_SOURCE"
 chmod 644 "$ECON_DEST.tmp"
 
 mv -f "$DEST.tmp" "$DEST"
 mv -f "$ECON_ACQ_DEST.tmp" "$ECON_ACQ_DEST"
+mv -f "$AMPLIFYOS_DEST.tmp" "$AMPLIFYOS_DEST"
 mv -f "$ECON_DEST.tmp" "$ECON_DEST"
 echo "growth funnels snapshot refreshed: $DEST"
 echo "creator economics snapshot refreshed: $ECON_DEST"

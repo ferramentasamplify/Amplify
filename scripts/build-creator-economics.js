@@ -4,6 +4,7 @@ const zlib = require('zlib')
 
 const DOWNLOADS = process.env.TIKTOK_REPORTS_DIR || path.join(process.cwd(), 'data/tiktok-shop-reports/downloads')
 const ACQUISITION = process.env.CREATOR_ECONOMICS_ACQUISITION || '/var/lib/amplify-hub/creator-economics-acquisition.json'
+const AMPLIFYOS_ACQUISITION = process.env.AMPLIFYOS_CREATOR_ACQUISITION || '/var/lib/amplify-hub/amplifyos-creator-acquisition.json'
 const OUTPUT = process.env.CREATOR_ECONOMICS_OUTPUT || '/var/lib/amplify-hub/creator-economics-live.json'
 const SUPER_UTMS = new Set(['giselecorreia', 'jota_', 'andreeleia_', 'glow.fit1'])
 
@@ -39,30 +40,44 @@ function groupByHandle(rows) {
   return map
 }
 function matches(map, aliases) { return aliases.flatMap((alias) => map.get(alias) || []) }
-function classify(machine, indique, sniper, form) {
+function sourceRecord(record, source, systemKey, systemLabel) {
+  return { ...source, entryAt: String(record?.createdAt || '').slice(0, 10), systemKey, systemLabel }
+}
+function classify(machine, indique, sniper, form, amplifyos) {
   if (indique) {
     const utm = normalize(indique.utm)
-    if (SUPER_UTMS.has(utm)) return { key: 'super-affiliate', label: 'Super Afiliado', detail: indique.utm || 'UTM cadastrada', evidence: 'UTM_Source · Indique e Ganhe' }
-    return { key: 'referral', label: 'Indique e Ganhe', detail: indique.utm || 'Sem UTM', evidence: 'Formulario Indique e Ganhe' }
+    if (SUPER_UTMS.has(utm)) return sourceRecord(indique, { key: 'super-affiliate', label: 'Super Afiliado', detail: indique.utm || 'UTM cadastrada', evidence: 'UTM_Source · Indique e Ganhe' }, 'indique', 'Indique e Ganhe')
+    return sourceRecord(indique, { key: 'referral', label: 'Indique e Ganhe', detail: indique.utm || 'Sem UTM', evidence: 'Formulario Indique e Ganhe' }, 'indique', 'Indique e Ganhe')
   }
-  if (sniper) return { key: 'sniper', label: 'Sniper outbound', detail: sniper.phase || 'Lead outbound', evidence: 'Base Leads Outbound' }
+  if (sniper) return sourceRecord(sniper, { key: 'sniper', label: 'Sniper outbound', detail: sniper.phase || 'Lead outbound', evidence: 'Base Leads Outbound' }, 'sniper', 'Sniper')
+  if (amplifyos) {
+    const origin = normalize(amplifyos.origin)
+    if (/programa indique/.test(origin)) return sourceRecord(amplifyos, { key: 'referral', label: 'Indique e Ganhe', detail: amplifyos.origin, evidence: 'Origem · AmplifyOS' }, 'amplifyos', 'AmplifyOS / Nova IA')
+    if (/ads meta/.test(origin)) return sourceRecord(amplifyos, { key: 'paid-meta', label: 'Meta Ads', detail: amplifyos.origin, evidence: 'Origem · AmplifyOS' }, 'amplifyos', 'AmplifyOS / Nova IA')
+    if (/whatsapp.*direto/.test(origin)) return sourceRecord(amplifyos, { key: 'direct', label: 'WhatsApp direto', detail: amplifyos.origin, evidence: 'Origem · AmplifyOS' }, 'amplifyos', 'AmplifyOS / Nova IA')
+  }
   if (machine) {
     const origin = normalize(machine.origin)
-    if (/programa indique/.test(origin)) return { key: 'referral', label: 'Indique e Ganhe', detail: machine.origin, evidence: 'Origem · Novos Creators' }
-    if (/ads meta|origem desconhecida/.test(origin)) return { key: 'paid-meta', label: 'Meta Ads / sem UTM', detail: machine.origin, evidence: 'Origem · Novos Creators' }
-    if (/organico meta/.test(origin)) return { key: 'instagram-organic', label: 'Instagram organico', detail: machine.origin, evidence: 'Origem · Novos Creators' }
-    if (/organico tiktok/.test(origin)) return { key: 'tiktok-organic', label: 'TikTok organico', detail: machine.origin, evidence: 'Origem · Novos Creators' }
-    if (origin) return { key: 'other', label: 'Outros canais', detail: machine.origin, evidence: 'Origem · Novos Creators' }
+    if (/programa indique/.test(origin)) return sourceRecord(machine, { key: 'referral', label: 'Indique e Ganhe', detail: machine.origin, evidence: 'Origem · Novos Creators' }, 'notion', 'Notion / Maquina antiga')
+    if (/ads meta|origem desconhecida/.test(origin)) return sourceRecord(machine, { key: 'paid-meta', label: 'Meta Ads / sem UTM', detail: machine.origin, evidence: 'Origem · Novos Creators' }, 'notion', 'Notion / Maquina antiga')
+    if (/organico meta/.test(origin)) return sourceRecord(machine, { key: 'instagram-organic', label: 'Instagram organico', detail: machine.origin, evidence: 'Origem · Novos Creators' }, 'notion', 'Notion / Maquina antiga')
+    if (/organico tiktok/.test(origin)) return sourceRecord(machine, { key: 'tiktok-organic', label: 'TikTok organico', detail: machine.origin, evidence: 'Origem · Novos Creators' }, 'notion', 'Notion / Maquina antiga')
+    if (origin) return sourceRecord(machine, { key: 'other', label: 'Outros canais', detail: machine.origin, evidence: 'Origem · Novos Creators' }, 'notion', 'Notion / Maquina antiga')
   }
   if (form) {
     const channel = normalize(form.channel)
-    if (/me indicaram/.test(channel)) return { key: 'word-of-mouth', label: 'Indicacao direta', detail: form.channel, evidence: 'Canal de Origem · formulario' }
-    if (/instagram/.test(channel)) return { key: 'instagram-organic', label: 'Instagram organico', detail: form.channel, evidence: 'Canal de Origem · formulario' }
-    if (/tiktok/.test(channel)) return { key: 'tiktok-organic', label: 'TikTok organico', detail: form.channel, evidence: 'Canal de Origem · formulario' }
-    if (/entraram em contato/.test(channel)) return { key: 'outbound', label: 'Contato da Amplify', detail: form.channel, evidence: 'Canal de Origem · formulario' }
-    if (channel) return { key: 'other', label: 'Outros canais', detail: form.channel, evidence: 'Canal de Origem · formulario' }
+    if (/me indicaram/.test(channel)) return sourceRecord(form, { key: 'word-of-mouth', label: 'Indicacao direta', detail: form.channel, evidence: 'Canal de Origem · formulario' }, 'form', 'Formulario / Base de Creators')
+    if (/instagram/.test(channel)) return sourceRecord(form, { key: 'instagram-organic', label: 'Instagram organico', detail: form.channel, evidence: 'Canal de Origem · formulario' }, 'form', 'Formulario / Base de Creators')
+    if (/tiktok/.test(channel)) return sourceRecord(form, { key: 'tiktok-organic', label: 'TikTok organico', detail: form.channel, evidence: 'Canal de Origem · formulario' }, 'form', 'Formulario / Base de Creators')
+    if (/entraram em contato/.test(channel)) return sourceRecord(form, { key: 'outbound', label: 'Contato da Amplify', detail: form.channel, evidence: 'Canal de Origem · formulario' }, 'form', 'Formulario / Base de Creators')
+    if (channel) return sourceRecord(form, { key: 'other', label: 'Outros canais', detail: form.channel, evidence: 'Canal de Origem · formulario' }, 'form', 'Formulario / Base de Creators')
   }
-  return { key: 'unknown', label: 'Origem nao identificada', detail: '', evidence: 'Sem correspondencia de origem' }
+  return { key: 'unknown', label: 'Origem nao identificada', detail: '', evidence: 'Sem correspondencia de origem', entryAt: '', systemKey: 'unknown', systemLabel: 'Sistema nao identificado' }
+}
+function firstTouchSystem(records) {
+  const candidates = records.filter((item) => item?.record?.createdAt).map((item) => ({ ...item, createdAt: String(item.record.createdAt).slice(0, 10) }))
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.priority - b.priority)
+  return candidates[0] || null
 }
 function buildRuns(dates) {
   if (!dates.length) return []
@@ -96,9 +111,11 @@ function reportFiles() {
 
 function main() {
   const acquisition = JSON.parse(fs.readFileSync(ACQUISITION, 'utf8'))
+  const amplifyosAcquisition = JSON.parse(fs.readFileSync(AMPLIFYOS_ACQUISITION, 'utf8'))
   const maps = {
     forms: groupByHandle(acquisition.forms), indique: groupByHandle(acquisition.indique),
     machine: groupByHandle(acquisition.machine), sniper: groupByHandle(acquisition.sniper),
+    amplifyos: groupByHandle(amplifyosAcquisition.rows),
   }
   const creators = new Map()
   const files = reportFiles()
@@ -127,7 +144,18 @@ function main() {
     const indique = earliest(matches(maps.indique, aliases))
     const machine = earliest(matches(maps.machine, aliases))
     const sniper = earliest(matches(maps.sniper, aliases))
-    const source = classify(machine, indique, sniper, form)
+    const amplifyos = earliest(matches(maps.amplifyos, aliases))
+    const touches = [
+      { record: indique, source: classify(null, indique, null, null, null), priority: 0 },
+      { record: sniper, source: classify(null, null, sniper, null, null), priority: 1 },
+      { record: amplifyos, source: classify(null, null, null, null, amplifyos), priority: 2 },
+      { record: machine, source: classify(machine, null, null, null, null), priority: 3 },
+      { record: form, source: classify(null, null, null, form, null), priority: 4 },
+    ]
+    const firstTouch = firstTouchSystem(touches)
+    const firstKnownSource = firstTouchSystem(touches.filter((touch) => touch.source.key !== 'unknown'))
+    const fallbackKnownSource = touches.find((touch) => touch.record && touch.source.key !== 'unknown')
+    const source = firstKnownSource?.source || fallbackKnownSource?.source || firstTouch?.source || classify(null, null, null, null, null)
     const runs = buildRuns(creator.dates)
     const monthly = [...creator.monthLast.values()].sort((a, b) => a.month.localeCompare(b.month)).map((month) => ({
       ...month,
@@ -152,8 +180,10 @@ function main() {
       form: form ? { matched: true, createdAt: form.createdAt || '', channel: form.channel || '' } : { matched: false, createdAt: '', channel: '' },
       acquisition: {
         ...source,
-        entryAt: indique?.createdAt || sniper?.createdAt || machine?.createdAt || form?.createdAt || '',
-        utm: indique?.utm || '',
+        entryAt: firstTouch?.createdAt || source.entryAt || '',
+        systemKey: firstTouch?.source?.systemKey || source.systemKey,
+        systemLabel: firstTouch?.source?.systemLabel || source.systemLabel,
+        utm: source.key === 'super-affiliate' || source.key === 'referral' ? (indique?.utm || '') : '',
       },
       monthly,
       totals: { gmv: totalGmv, estimatedCreatorCommission: commission, estimatedAmplifyRevenue: round(commission * 0.10) },
@@ -161,7 +191,7 @@ function main() {
   }
   rows.sort((a, b) => b.totals.estimatedAmplifyRevenue - a.totals.estimatedAmplifyRevenue || a.handle.localeCompare(b.handle))
   const output = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     generatedAt: new Date().toISOString(),
     timezone: 'America/Sao_Paulo',
     coverage: { from: files[0]?.date || null, to: files.at(-1)?.date || null, dailySnapshots: files.length },
@@ -171,9 +201,10 @@ function main() {
       creatorCommission: 'Campo Est. commission (pre_estimated_commission) do Partner Center.',
       amplifyRevenue: '10% da comissao estimada do creator; nao e 1% fixo do GMV.',
       form: 'Correspondencia exata do @ com a Base de Creators; sem fuzzy match.',
-      source: 'Precedencia: UTM Indique/Super, Sniper, Origem Novos Creators, Canal de Origem do formulario.',
+      source: 'Data e sistema de first-touch usam a entrada mais antiga. Canal usa a evidencia conhecida mais antiga: Indique/Super, Sniper, AmplifyOS nativo, Novos Creators legado ou formulario; imports legados do AmplifyOS sao excluidos.',
+      cac: 'Gasto Meta e creators com first-touch pago dentro da mesma janela de aquisicao. O valor individual continua sendo media da coorte, sem join por ad_id.',
     },
-    sources: { ...acquisition.sources, retention: { name: 'TikTok Shop Partner Center · creator_gmv', files: files.length } },
+    sources: { ...acquisition.sources, amplifyos: { name: amplifyosAcquisition.source, ...amplifyosAcquisition.coverage }, retention: { name: 'TikTok Shop Partner Center · creator_gmv', files: files.length } },
     superAffiliateUtms: [...SUPER_UTMS],
     creators: rows,
   }

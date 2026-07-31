@@ -52,21 +52,25 @@ async function readMetaRange(fromMonth, toMonth) {
     if (!env.META_ACCESS_TOKEN || !env.META_AD_ACCOUNT_ID) throw new Error('credenciais Meta nao configuradas')
     const from = `${fromMonth}-01`
     const to = lastDay(toMonth)
-    const params = new URLSearchParams({
-      access_token: env.META_ACCESS_TOKEN,
-      fields: 'ad_id,ad_name,campaign_id,campaign_name,spend,results,actions',
-      time_range: JSON.stringify({ since: from, until: to }),
-      level: 'ad',
-      limit: '500',
-    })
-    let next = `https://graph.facebook.com/${META_API_VERSION}/${env.META_AD_ACCOUNT_ID}/insights?${params}`
     const rows = []
-    for (let page = 0; next && page < 8; page += 1) {
-      const response = await fetch(next, { cache: 'no-store', signal: AbortSignal.timeout(20_000) })
-      if (!response.ok) throw new Error(`Meta Graph respondeu ${response.status}`)
-      const payload = await response.json()
-      rows.push(...(Array.isArray(payload.data) ? payload.data : []))
-      next = payload.paging?.next || null
+    for (const month of monthsBetween(fromMonth, toMonth)) {
+      const monthFrom = month === fromMonth ? from : `${month}-01`
+      const monthTo = month === toMonth ? to : lastDay(month)
+      const params = new URLSearchParams({
+        access_token: env.META_ACCESS_TOKEN,
+        fields: 'ad_id,ad_name,campaign_id,campaign_name,spend,results,actions',
+        time_range: JSON.stringify({ since: monthFrom, until: monthTo }),
+        level: 'ad',
+        limit: '500',
+      })
+      let next = `https://graph.facebook.com/${META_API_VERSION}/${env.META_AD_ACCOUNT_ID}/insights?${params}`
+      for (let page = 0; next && page < 8; page += 1) {
+        const response = await fetch(next, { cache: 'no-store', signal: AbortSignal.timeout(20_000) })
+        if (!response.ok) throw new Error(`Meta Graph respondeu ${response.status} em ${month}`)
+        const payload = await response.json()
+        rows.push(...(Array.isArray(payload.data) ? payload.data : []))
+        next = payload.paging?.next || null
+      }
     }
     const creatorRows = rows.filter((row) => !/marcas?/i.test(row.campaign_name || ''))
     const value = {
@@ -97,18 +101,39 @@ function sourceAggregate(rows) {
   const bySource = new Map()
   for (const row of rows) {
     const key = row.acquisition.key
-    if (!bySource.has(key)) bySource.set(key, { key, label: row.acquisition.label, creators: 0, entered: 0, matchedForms: 0, returned: 0, activeDays: 0, gmv: 0, estimatedAmplifyRevenue: 0, lifetimeRevenue: 0 })
+    if (!bySource.has(key)) bySource.set(key, { key, label: row.acquisition.label, creators: 0, entered: 0, acquired: 0, matchedForms: 0, returned: 0, activeDays: 0, gmv: 0, estimatedAmplifyRevenue: 0, lifetimeRevenue: 0 })
     const item = bySource.get(key)
     item.creators += 1
     item.entered += row.enteredInRange ? 1 : 0
+    item.acquired += row.acquiredInRange ? 1 : 0
     item.matchedForms += row.form.matched ? 1 : 0
     item.returned += row.returnedInRange ? 1 : 0
     item.activeDays += row.period.activeDays
     item.gmv += row.period.gmv
     item.estimatedAmplifyRevenue += row.period.estimatedAmplifyRevenue
-    item.lifetimeRevenue += row.totals.estimatedAmplifyRevenue
+    item.lifetimeRevenue += row.observedLtv
   }
   return [...bySource.values()].map((item) => ({
+    ...item,
+    formMatchRate: percent(item.creators, item.matchedForms),
+    avgObservedLtv: round(item.lifetimeRevenue / Math.max(item.creators, 1)),
+    gmv: round(item.gmv), estimatedAmplifyRevenue: round(item.estimatedAmplifyRevenue), lifetimeRevenue: round(item.lifetimeRevenue),
+  })).sort((a, b) => b.estimatedAmplifyRevenue - a.estimatedAmplifyRevenue)
+}
+function systemAggregate(rows) {
+  const bySystem = new Map()
+  for (const row of rows) {
+    const key = row.acquisition.systemKey || 'unknown'
+    if (!bySystem.has(key)) bySystem.set(key, { key, label: row.acquisition.systemLabel || 'Sistema nao identificado', creators: 0, acquired: 0, matchedForms: 0, gmv: 0, estimatedAmplifyRevenue: 0, lifetimeRevenue: 0 })
+    const item = bySystem.get(key)
+    item.creators += 1
+    item.acquired += row.acquiredInRange ? 1 : 0
+    item.matchedForms += row.form.matched ? 1 : 0
+    item.gmv += row.period.gmv
+    item.estimatedAmplifyRevenue += row.period.estimatedAmplifyRevenue
+    item.lifetimeRevenue += row.observedLtv
+  }
+  return [...bySystem.values()].map((item) => ({
     ...item,
     formMatchRate: percent(item.creators, item.matchedForms),
     avgObservedLtv: round(item.lifetimeRevenue / Math.max(item.creators, 1)),
@@ -146,11 +171,16 @@ export async function GET(request) {
         estimatedCreatorCommission: periodCommission,
         estimatedAmplifyRevenue: round(periodCommission * 0.10),
       }
+      const acquisitionMonth = creator.acquisition.entryAt?.slice(0, 7) || ''
+      const postAcquisitionMonths = acquisitionMonth ? creator.monthly.filter((month) => month.month >= acquisitionMonth) : creator.monthly
+      const observedLtv = round(postAcquisitionMonths.reduce((sum, month) => sum + month.estimatedAmplifyRevenue, 0))
       return {
         ...creator,
         monthly,
         period,
+        observedLtv,
         enteredInRange: inDateRange(creator.firstLinked, from, to),
+        acquiredInRange: inDateRange(creator.acquisition.entryAt, from, to),
         returnedInRange: creator.returnDates.some((date) => inDateRange(date, from, to)),
       }
     }).filter(Boolean)
@@ -174,9 +204,9 @@ export async function GET(request) {
     })
 
     const meta = await readMetaRange(from, to)
-    const paidCohort = activeRows.filter((row) => row.acquisition.key === 'paid-meta' && row.enteredInRange)
+    const paidCohort = activeRows.filter((row) => row.acquisition.key === 'paid-meta' && row.acquiredInRange)
     const paidCac = meta.spend !== null && paidCohort.length ? round(meta.spend / paidCohort.length) : null
-    const paidLifetimeRevenue = round(paidCohort.reduce((sum, row) => sum + row.totals.estimatedAmplifyRevenue, 0))
+    const paidLifetimeRevenue = round(paidCohort.reduce((sum, row) => sum + row.observedLtv, 0))
     const paidAvgObservedLtv = paidCohort.length ? round(paidLifetimeRevenue / paidCohort.length) : null
     const paidLtvCac = paidCac ? round(paidAvgObservedLtv / paidCac) : null
 
@@ -184,16 +214,16 @@ export async function GET(request) {
     const entered = filtered.filter((row) => row.enteredInRange).length
     const matchedForms = filtered.filter((row) => row.form.matched).length
     const returned = filtered.filter((row) => row.returnedInRange).length
-    const lifetimeRevenue = round(filtered.reduce((sum, row) => sum + row.totals.estimatedAmplifyRevenue, 0))
+    const lifetimeRevenue = round(filtered.reduce((sum, row) => sum + row.observedLtv, 0))
     const rowsForTable = filtered.filter((row) => !query || row.handle.includes(query) || row.aliases.some((alias) => alias.includes(query)))
       .map((row) => ({
         ...row,
-        allocatedCac: row.acquisition.key === 'paid-meta' && row.enteredInRange ? paidCac : null,
-        ltvCac: row.acquisition.key === 'paid-meta' && row.enteredInRange && paidCac ? round(row.totals.estimatedAmplifyRevenue / paidCac) : null,
+        allocatedCac: row.acquisition.key === 'paid-meta' && row.acquiredInRange ? paidCac : null,
+        ltvCac: row.acquisition.key === 'paid-meta' && row.acquiredInRange && paidCac ? round(row.observedLtv / paidCac) : null,
       }))
     const sorters = {
       revenue: (a, b) => b.period.estimatedAmplifyRevenue - a.period.estimatedAmplifyRevenue,
-      lifetime: (a, b) => b.totals.estimatedAmplifyRevenue - a.totals.estimatedAmplifyRevenue,
+      lifetime: (a, b) => b.observedLtv - a.observedLtv,
       gmv: (a, b) => b.period.gmv - a.period.gmv,
       days: (a, b) => b.period.activeDays - a.period.activeDays,
       handle: (a, b) => a.handle.localeCompare(b.handle),
@@ -230,18 +260,20 @@ export async function GET(request) {
         avgObservedLtv: paidAvgObservedLtv,
         ltvCac: paidLtvCac,
         lifetimeRevenue: paidLifetimeRevenue,
-        allocation: 'CAC medio da coorte paga; nao e custo deterministico por creator porque Campaign/AdSet/Ad estao vazios no Notion.',
+        allocation: 'CAC medio dos creators Meta com first-touch na janela e @ vinculado ao Partner Center; nao e custo deterministico por creator porque o CRM ainda nao persiste ad_id.',
         meta,
       },
       monthly,
       sourceOptions,
       sourceBreakdown: sourceAggregate(activeRows),
+      systemBreakdown: systemAggregate(activeRows),
       creators: rowsForTable.slice(start, start + limit),
       pagination: { page, limit, total: rowsForTable.length, pages: Math.max(1, Math.ceil(rowsForTable.length / limit)) },
       caveats: [
         'Receita Amplify estimada = 10% da Est. commission do Partner Center.',
         'Est. commission inclui pedidos que podem ser reembolsados; nao representa lucro liquido contabil.',
-        'CAC individual e uma alocacao media da coorte Meta, pois o CRM nao persistiu Campaign, AdSet e Ad para os creators.',
+        'CAC individual e uma alocacao media dos creators Meta com first-touch na janela e @ vinculado ao Partner Center; o CRM ainda nao persiste ad_id.',
+        'AmplifyOS considera somente origens nativas Ads Meta, WhatsApp direto e Programa Indique; imports legados sao excluidos da Nova IA.',
         'Formulario preenchido exige correspondencia exata do @ ou de um alias historico; nomes parecidos nao sao unidos.',
       ],
     }, { headers: { 'Cache-Control': 'no-store, max-age=0' } })
