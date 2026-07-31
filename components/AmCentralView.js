@@ -3,20 +3,39 @@
 import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
+import PartnerCenterDateSelector from "@/components/PartnerCenterDateSelector";
+import { tiktokProfileUrl } from "@/lib/tiktok-profile-url";
 
 const fmtBRL = (n) =>
   "R$ " +
   Number(n || 0).toLocaleString("pt-BR", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   });
 const fmtPct = (n) => `${Number(n || 0).toFixed(0)}%`;
+const fmtShortBRL = (n) => {
+  const value = Number(n || 0);
+  if (Math.abs(value) >= 1000000) return `R$ ${(value / 1000000).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} mi`;
+  if (Math.abs(value) >= 1000) return `R$ ${(value / 1000).toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 0 })} mil`;
+  return fmtBRL(value);
+};
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const fmtDate = (dateString) => {
   if (!dateString) return "—";
   const [year, month, day] = String(dateString).split("-");
   if (!year || !month || !day) return dateString;
   return `${day}/${month}/${year}`;
+};
+const healthClasses = {
+  blue: "border-sky-400/30 bg-sky-400/10 text-sky-100",
+  orange: "border-amber-400/35 bg-amber-400/10 text-amber-100",
+  red: "border-red-400/40 bg-red-500/10 text-red-100",
+};
+const healthDot = {
+  blue: "#38bdf8",
+  orange: "#f59e0b",
+  red: "#ef4444",
 };
 
 /** Cavalinho animado — foto circular com bobbing idle e posição X animada */
@@ -118,6 +137,9 @@ export default function AmCentralView() {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState(todayISO());
   const [applied, setApplied] = useState({ from: "", to: todayISO() });
+  const [chartMode, setChartMode] = useState("goal");
+  const [legacyChartMode, setLegacyChartMode] = useState("split");
+  const [selectedAmDrill, setSelectedAmDrill] = useState("");
 
   async function load() {
     setError("");
@@ -181,9 +203,38 @@ export default function AmCentralView() {
   const ranking = data?.ranking || [];
   const totalGmv = ranking.reduce((acc, r) => acc + r.gmvTotal, 0);
   const freshness = data?.dataFreshness || {};
-  const requestedPeriod = freshness.requestedPeriod || applied;
   const effectiveCoverage = freshness.effectiveCoverage || {};
   const availablePeriods = freshness.availablePeriods || [];
+  const warnings = data?.warnings || [];
+  const goals = data?.goals || {};
+  const timeline = data?.gmvTimeline || {};
+  const goalTimeline = data?.goalTimeline || {};
+  const creatorHealth = data?.creatorHealth || [];
+  const healthCounts = creatorHealth.reduce((acc, item) => {
+    acc[item.tone] = (acc[item.tone] || 0) + 1;
+    return acc;
+  }, {});
+  const chartData = (timeline.points || []).map((point) => {
+    const row = { date: point.date, label: fmtDate(point.date) };
+    let total = 0;
+    for (const r of ranking) {
+      const value = Number(point.am?.[r.am.slug] || 0);
+      row[r.am.slug] = value;
+      total += value;
+    }
+    row.total = total;
+    return row;
+  });
+  const goalChartData = (goalTimeline.points || []).map((point) => {
+    const row = { ...point, label: fmtDate(point.date) };
+    if (selectedAmDrill) {
+      const drillPoint = goalTimeline.creators?.[selectedAmDrill]?.find((item) => item.date === point.date);
+      for (const [handle, value] of Object.entries(drillPoint?.creators || {})) row[handle] = Number(value || 0);
+    }
+    return row;
+  });
+  const selectedRanking = ranking.find((item) => item.am.slug === selectedAmDrill);
+  const drillCreators = selectedRanking?.creators?.slice(0, 12) || [];
 
   return (
     <div className="min-h-screen bg-[#0A0B12] text-white font-sans">
@@ -261,66 +312,173 @@ export default function AmCentralView() {
             </div>
           )}
 
-          <div className="bg-[#14161F] border border-white/10 rounded-2xl p-4">
-            <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
-              <div>
-                <div className="text-[10px] font-mono uppercase tracking-widest text-white/40">
-                  Período contabilizado
-                </div>
-                <div className="text-sm font-bold text-white mt-1">
-                  Pedido: {fmtDate(requestedPeriod?.from)} → {fmtDate(requestedPeriod?.to)}
-                </div>
-                <div className="text-xs text-white/45 mt-0.5">
-                  Usado no cálculo: {fmtDate(effectiveCoverage?.from)} → {fmtDate(effectiveCoverage?.to)}
-                </div>
+          <div className="flex flex-col lg:flex-row lg:items-end lg:justify-end gap-4">
+              <PartnerCenterDateSelector
+                startDate={startDate}
+                endDate={endDate}
+                setStartDate={setStartDate}
+                setEndDate={setEndDate}
+                onApply={(from, to) => setApplied({ from, to })}
+                loading={loading}
+                freshness={freshness}
+                accent="#a855f7"
+              />
+            {warnings.length > 0 && (
+              <div className="rounded-xl border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-xs text-amber-100">
+                {warnings[0]}
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <input
-                  type="date"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                  className="bg-[#0A0B12] border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:border-[#a855f7]"
-                />
-                <span className="text-white/30 text-xs">→</span>
-                <input
-                  type="date"
-                  value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                  className="bg-[#0A0B12] border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:border-[#a855f7]"
-                />
-                <button
-                  onClick={() => setApplied({ from: startDate, to: endDate })}
-                  className="px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-[#a855f7] hover:bg-[#9333ea]"
-                >
-                  Aplicar período
-                </button>
+            )}
+          </div>
+
+          <section className="grid grid-cols-1 gap-4 lg:grid-cols-[360px_1fr]">
+            <div className="bg-[#14161F] border border-white/10 rounded-2xl p-4">
+              <div className="text-[10px] font-mono uppercase tracking-widest text-white/40">
+                Alertas da base
               </div>
+              <h2 className="mt-1 text-xl font-black">Creators que pedem atenção</h2>
+              <div className="mt-4 grid grid-cols-3 gap-2">
+                {[
+                  ["red", "Crítico"],
+                  ["orange", "Atenção"],
+                  ["blue", "OK"],
+                ].map(([tone, label]) => (
+                  <div key={tone} className={`rounded-xl border p-3 ${healthClasses[tone]}`}>
+                    <div className="text-[10px] font-bold uppercase tracking-wide opacity-70">{label}</div>
+                    <div className="mt-1 text-2xl font-black">{healthCounts[tone] || 0}</div>
+                  </div>
+                ))}
+              </div>
+              <p className="mt-3 text-[11px] leading-relaxed text-white/35">
+                Regra inicial: vermelho com 7 dias sem GMV ou queda forte; laranja com 4 dias sem GMV ou queda moderada. WhatsApp ainda fica sinalizado como fonte pendente.
+              </p>
             </div>
-            {availablePeriods.length > 0 && (
-              <div className="flex flex-wrap gap-2 mt-3">
-                {availablePeriods.slice(-7).map((period) => (
+
+            {goals?.period && (
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                {ranking.map((goal) => (
                   <button
-                    key={`${period.start}-${period.endInclusive}`}
+                    key={goal.am.slug}
+                    type="button"
                     onClick={() => {
-                      setStartDate(period.start);
-                      setEndDate(period.endInclusive);
-                      setApplied({ from: period.start, to: period.endInclusive });
+                      setSelectedAmDrill(goal.am.slug);
+                      setChartMode("creators");
                     }}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold border ${
-                      requestedPeriod?.from === period.start && requestedPeriod?.to === period.endInclusive
-                        ? "bg-white text-black border-white"
-                        : "bg-white/[0.03] border-white/10 text-white/60 hover:text-white"
-                    }`}
+                    className="bg-[#14161F] border border-white/10 rounded-2xl p-4 text-left hover:border-white/25"
                   >
-                    {period.month}{period.partial ? " parcial" : ""}
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-[10px] font-mono uppercase tracking-widest text-white/40">
+                        Meta agosto · carteira
+                      </div>
+                      <div className="mt-1 text-lg font-black" style={{ color: goal.am.accentColor }}>
+                        {goal.am.shortName}
+                      </div>
+                    </div>
+                    <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[10px] font-bold text-white/55">
+                      {goal.augustGoal?.status}
+                    </span>
+                  </div>
+                  <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
+                    <div className="rounded-lg bg-white/[0.03] p-2">
+                      <div className="text-[9px] uppercase text-white/35">Realizado</div>
+                      <div className="font-mono font-bold text-white">{fmtBRL(goal.augustGoal?.realizedGmv)}</div>
+                    </div>
+                    <div className="rounded-lg bg-white/[0.03] p-2">
+                      <div className="text-[9px] uppercase text-white/35">Meta</div>
+                      <div className="font-mono font-bold text-white">{fmtBRL(goal.augustGoal?.targetGmv)}</div>
+                    </div>
+                  </div>
+                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">
+                    <div
+                      className="h-full rounded-full"
+                      style={{
+                        width: `${Math.min(100, goal.augustGoal?.progressPct || 0)}%`,
+                        background: goal.am.accentColor,
+                      }}
+                    />
+                  </div>
+                  <div className="mt-2 flex justify-between text-[10px] text-white/40">
+                    <span>{fmtPct(goal.augustGoal?.progressPct)} da meta</span>
+                    <span>Falta {fmtBRL(goal.augustGoal?.gap)}</span>
+                  </div>
                   </button>
                 ))}
               </div>
             )}
-            <div className="text-[11px] text-white/40 mt-3">
-              TikTok Shop Partner Center · {(effectiveCoverage?.snapshots || []).length} snapshot{(effectiveCoverage?.snapshots || []).length === 1 ? "" : "s"} · {effectiveCoverage?.mode === "overlap_approximation" ? "aproximação por cobertura disponível" : "cobertura exata/contida"}
+          </section>
+
+          <section className="bg-[#14161F] border border-white/10 rounded-3xl p-5 sm:p-6">
+            <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 mb-5">
+              <div>
+                <div className="text-[10px] font-mono uppercase tracking-widest text-white/40">
+                  Evolução da meta
+                </div>
+                <h2 className="mt-1 text-xl font-black">
+                  {chartMode === "creators" && selectedRanking ? `${selectedRanking.am.shortName}: creators da carteira` : "Gestão macro das carteiras"}
+                </h2>
+                <p className="mt-1 text-xs text-white/40">
+                  Clique em uma carteira acima para quebrar a linha nos creators sem sair da Central.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => {
+                    setChartMode("goal");
+                    setSelectedAmDrill("");
+                  }}
+                  className={`rounded-lg border px-3 py-2 text-xs font-bold ${chartMode === "goal" ? "border-white bg-white text-black" : "border-white/10 bg-white/5 text-white/60 hover:text-white"}`}
+                >
+                  % da meta
+                </button>
+                <button
+                  onClick={() => setChartMode("split")}
+                  className={`rounded-lg border px-3 py-2 text-xs font-bold ${chartMode === "split" ? "border-white bg-white text-black" : "border-white/10 bg-white/5 text-white/60 hover:text-white"}`}
+                >
+                  GMV por AM
+                </button>
+              </div>
             </div>
-          </div>
+
+            <div className="h-[340px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={goalChartData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                  <CartesianGrid stroke="rgba(255,255,255,0.07)" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fill: "rgba(255,255,255,0.45)", fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={22} />
+                  <YAxis tick={{ fill: "rgba(255,255,255,0.45)", fontSize: 10 }} tickLine={false} axisLine={false} width={72} tickFormatter={chartMode === "goal" ? fmtPct : fmtShortBRL} />
+                  <Tooltip
+                    contentStyle={{ background: "#0A0B12", border: "1px solid rgba(255,255,255,0.14)", borderRadius: 8, color: "#fff" }}
+                    labelStyle={{ color: "rgba(255,255,255,0.55)" }}
+                    formatter={(value, name) => [chartMode === "goal" ? fmtPct(value) : fmtBRL(value), String(name).replace(/Pct$|Gmv$/g, "")]}
+                  />
+                  {chartMode === "creators" && selectedRanking ? (
+                    drillCreators.map((creator, index) => (
+                      <Line
+                        key={creator.handle}
+                        type="monotone"
+                        dataKey={creator.handle}
+                        name={`@${creator.handle}`}
+                        stroke={["#25F4EE", "#ec4899", "#3b82f6", "#f59e0b", "#10b981", "#a855f7", "#f43f5e", "#14b8a6", "#eab308", "#06b6d4", "#84cc16", "#fb7185"][index % 12]}
+                        strokeWidth={2}
+                        dot={false}
+                        activeDot={{ r: 3 }}
+                      />
+                    ))
+                  ) : chartMode === "goal" ? (
+                    <>
+                      <Line type="monotone" dataKey="totalPct" name="Total" stroke="#25F4EE" strokeWidth={3} dot={false} activeDot={{ r: 4 }} />
+                      {ranking.map((r) => (
+                        <Line key={r.am.slug} type="monotone" dataKey={`${r.am.slug}Pct`} name={r.am.shortName} stroke={r.am.accentColor} strokeWidth={2} dot={false} activeDot={{ r: 3 }} />
+                      ))}
+                    </>
+                  ) : (
+                    ranking.map((r) => (
+                      <Line key={r.am.slug} type="monotone" dataKey={`${r.am.slug}Gmv`} name={r.am.shortName} stroke={r.am.accentColor} strokeWidth={3} dot={false} activeDot={{ r: 4 }} />
+                    ))
+                  )}
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </section>
 
           {/* Pista de corrida */}
           <div className="bg-gradient-to-br from-[#14161F] to-[#0F111A] border border-white/10 rounded-3xl p-6 sm:p-8">
@@ -330,13 +488,16 @@ export default function AmCentralView() {
               </h2>
               <div className="text-right text-xs text-white/40">
                 <div>Total combinado: <span className="font-mono font-bold text-white">{fmtBRL(totalGmv)}</span></div>
-                <div>Régua = GMV do mês passado por carteira</div>
+                <div>Régua = ritmo vs mês anterior; cor abaixo sinaliza risco</div>
               </div>
             </div>
 
             <div className="space-y-2">
-              {ranking.map((r) => (
-                <div key={r.am.slug} className="relative">
+              {ranking.map((r) => {
+                const riskTone = r.progressVsPreviousPct < 80 ? "red" : r.progressVsPreviousPct < 100 ? "orange" : "blue";
+                const carteiraAlerts = creatorHealth.filter((item) => item.amSlug === r.am.slug && item.tone !== "blue").length;
+                return (
+                <div key={r.am.slug} className={`relative rounded-2xl border p-3 ${healthClasses[riskTone]}`}>
                   <Horse
                     am={r.am}
                     trackPositionPct={r.trackPositionPct}
@@ -356,10 +517,15 @@ export default function AmCentralView() {
                       <span className="text-[10px] text-white/40">
                         · {r.carteiraSize} creators · {r.ativos} ativos
                       </span>
+                      {carteiraAlerts > 0 && (
+                        <span className="rounded-full bg-black/25 px-2 py-0.5 text-[10px] font-bold text-white/70">
+                          {carteiraAlerts} alertas
+                        </span>
+                      )}
                     </div>
                     <div className="flex items-center gap-3">
                       <span className="text-xs text-white/40 font-mono">
-                        {fmtPct(r.progressVsPreviousPct)} vs mês passado
+                        {fmtPct(r.progressVsPreviousPct)} vs período anterior
                       </span>
                       <span className="text-sm font-extrabold text-white font-mono tabular-nums">
                         {fmtBRL(r.gmvTotal)}
@@ -367,17 +533,133 @@ export default function AmCentralView() {
                     </div>
                   </div>
                   <div className="flex items-center justify-between px-2 mt-1 text-[10px] text-white/35">
-                    <span>Base mês passado: {fmtBRL(r.previousGmvTotal)}</span>
+                    <span>Base período anterior: {fmtBRL(r.previousGmvTotal)}</span>
                     {r.progressVsPreviousPct > 100 && (
                       <span className="text-emerald-300 font-bold">
                         +{fmtPct(r.progressVsPreviousPct - 100)} acima da base
                       </span>
                     )}
+                    {r.progressVsPreviousPct < 100 && (
+                      <span className={riskTone === "red" ? "text-red-200 font-bold" : "text-amber-200 font-bold"}>
+                        ritmo abaixo da base
+                      </span>
+                    )}
                   </div>
                 </div>
-              ))}
+              )})}
             </div>
           </div>
+
+          <div className="bg-[#14161F] border border-white/10 rounded-3xl p-5 sm:p-6">
+            <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 mb-5">
+              <div>
+                <div className="text-[10px] font-mono uppercase tracking-widest text-white/40">
+                  Evolução de GMV original
+                </div>
+                <h2 className="mt-1 text-xl font-black">
+                  {legacyChartMode === "total" ? "Carteira completa" : "Camila vs Leonardo"}
+                </h2>
+                <p className="mt-1 text-xs text-white/40">
+                  Gráfico anterior preservado: linha acumulada dia a dia dentro do período selecionado.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-end gap-2">
+                <label className="grid gap-1 text-[10px] font-mono uppercase tracking-widest text-white/35">
+                  Visão
+                  <select
+                    value={legacyChartMode}
+                    onChange={(event) => setLegacyChartMode(event.target.value)}
+                    className="rounded-lg border border-white/10 bg-[#0A0B12] px-3 py-2 text-xs font-bold normal-case tracking-normal text-white"
+                  >
+                    <option value="split">Camila + Leonardo</option>
+                    <option value="total">Carteira completa</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+
+            <div className="h-[320px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={chartData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                  <CartesianGrid stroke="rgba(255,255,255,0.07)" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fill: "rgba(255,255,255,0.45)", fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={22} />
+                  <YAxis tick={{ fill: "rgba(255,255,255,0.45)", fontSize: 10 }} tickLine={false} axisLine={false} width={70} tickFormatter={fmtShortBRL} />
+                  <Tooltip
+                    contentStyle={{ background: "#0A0B12", border: "1px solid rgba(255,255,255,0.14)", borderRadius: 8, color: "#fff" }}
+                    labelStyle={{ color: "rgba(255,255,255,0.55)" }}
+                    formatter={(value) => [fmtBRL(value), "GMV"]}
+                  />
+                  {legacyChartMode === "total" ? (
+                    <Line type="monotone" dataKey="total" name="Carteira completa" stroke="#25F4EE" strokeWidth={3} dot={false} activeDot={{ r: 4 }} />
+                  ) : (
+                    ranking.map((r) => (
+                      <Line key={r.am.slug} type="monotone" dataKey={r.am.slug} name={r.am.shortName} stroke={r.am.accentColor} strokeWidth={3} dot={false} activeDot={{ r: 4 }} />
+                    ))
+                  )}
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          <section className="bg-[#14161F] border border-white/10 rounded-3xl p-5 sm:p-6">
+            <div className="mb-5 flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
+              <div>
+                <div className="text-[10px] font-mono uppercase tracking-widest text-white/40">
+                  Saúde por creator
+                </div>
+                <h2 className="mt-1 text-xl font-black">Blocos de alerta e anomalia</h2>
+              </div>
+              <div className="text-xs text-white/40">
+                Ordenado por risco: vermelho, laranja, azul.
+              </div>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {creatorHealth.map((item) => {
+                const owner = ranking.find((r) => r.am.slug === item.amSlug);
+                return (
+                  <Link
+                    key={`${item.amSlug}-${item.handle}`}
+                    href={`/club/am/${item.amSlug}/creator/${encodeURIComponent(item.handle)}`}
+                    className={`block rounded-2xl border p-4 transition hover:border-white/40 ${healthClasses[item.tone] || healthClasses.blue}`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="h-2.5 w-2.5 rounded-full" style={{ background: healthDot[item.tone] || healthDot.blue }} />
+                          <h3 className="truncate text-sm font-black text-white">{item.nome || item.handle}</h3>
+                        </div>
+                        <p className="mt-1 truncate text-[11px] text-white/45">
+                          @{item.handle} · {owner?.am.shortName || item.amSlug}
+                        </p>
+                      </div>
+                      <span className="rounded-full bg-black/25 px-2 py-1 text-[10px] font-black uppercase tracking-wide">
+                        {item.status}
+                      </span>
+                    </div>
+                    <div className="mt-4 grid grid-cols-3 gap-2 text-xs">
+                      <div>
+                        <div className="text-[9px] uppercase text-white/35">GMV</div>
+                        <b className="font-mono text-white">{fmtShortBRL(item.gmv)}</b>
+                      </div>
+                      <div>
+                        <div className="text-[9px] uppercase text-white/35">7 dias</div>
+                        <b className="font-mono text-white">{fmtShortBRL(item.last7Gmv)}</b>
+                      </div>
+                      <div>
+                        <div className="text-[9px] uppercase text-white/35">Últ. atividade</div>
+                        <b className="font-mono text-white">{item.daysWithoutActivity === null ? "—" : `${item.daysWithoutActivity}d`}</b>
+                      </div>
+                    </div>
+                    <div className="mt-3 space-y-1">
+                      {(item.reasons?.length ? item.reasons : ["sem anomalia relevante"]).map((reason) => (
+                        <div key={reason} className="text-[11px] text-white/60">• {reason}</div>
+                      ))}
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          </section>
 
           {/* Ranking detalhado */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -439,7 +721,7 @@ export default function AmCentralView() {
                     <div className="text-xs font-bold text-[#25F4EE]">{fmtBRL(r.receitaTotal)}</div>
                   </div>
                   <div className="bg-white/[0.03] rounded-lg p-2 text-center">
-                    <div className="text-[9px] text-white/40 uppercase">Vs mês passado</div>
+                    <div className="text-[9px] text-white/40 uppercase">Vs período anterior</div>
                     <div className="text-xs font-bold text-white">
                       {r.previousGmvTotal > 0 ? fmtPct(r.progressVsPreviousPct) : "—"}
                     </div>
@@ -463,7 +745,9 @@ export default function AmCentralView() {
                             ) : (
                               <span className="font-bold truncate">{c.nome}</span>
                             )}
-                            <span className="text-white/40 text-[10px]">@{c.handle}</span>
+                            <a href={tiktokProfileUrl(c.handle)} target="_blank" rel="noreferrer" className="text-white/40 text-[10px] hover:text-[#25F4EE] hover:underline">
+                              @{c.handle}
+                            </a>
                             {c.source === "partner_center_only" && (
                               <span className="text-[9px] text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded px-1">
                                 sem cadastro
@@ -493,18 +777,15 @@ export default function AmCentralView() {
             Refresha a cada 90s · próxima att em {90 - (Math.floor(Date.now() / 1000) % 90)}s
           </p>
 
-          <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 text-amber-100 text-sm">
-            <div className="font-bold mb-1">Fontes de dados em atenção</div>
+          {warnings.length > 0 && (
+            <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 text-amber-100 text-sm">
               <div className="space-y-1 text-xs text-amber-100/80">
-                <div>• GMV e comissão devem vir do snapshot diário TikTok Shop/Partner Center; a central não deve abrir o Partner Center ao vivo a cada refresh.</div>
-                <div>• Notion entra só como cadastro auxiliar: nome, categoria e link do perfil.</div>
-                <div>• Vencimento de contrato não aparece aqui enquanto o Partner Center/snapshot não trouxer esse campo.</div>
-                <div>• Drive/planilhas não são fonte final de granularidade quando o snapshot TikTok Shop estiver disponível.</div>
-              {(data?.warnings || []).map((w) => (
-                <div key={w}>• {w}</div>
-              ))}
+                {warnings.map((w) => (
+                  <div key={w}>• {w}</div>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
     </div>

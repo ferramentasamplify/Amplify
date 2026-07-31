@@ -3,11 +3,23 @@ import { readSession } from "@/lib/am-auth";
 import { AM_BY_SLUG, publicAmData } from "@/lib/am-config";
 import { CARTEIRAS } from "@/lib/carteiras";
 import { queryNotionDatabase } from "@/lib/notion-query";
-import { aggregateTikTokSnapshots, cleanHandle, defaultSnapshotPeriod } from "@/lib/tiktok-shop-snapshots";
+import {
+  cleanHandle,
+  defaultSnapshotPeriod,
+  getRetencaoCanonicalGmvTimeline,
+  getRetencaoCanonicalPeriod,
+} from "@/lib/retencao-canonical-data";
 
 export const dynamic = "force-dynamic";
 
 const CREATORS_DB = "2efb0bbef153811b946ddf8f0fff81a3";
+const TARGET_MULTIPLIER = 1.5;
+const AUGUST_GOAL_FROM = "2026-08-01";
+const AUGUST_GOAL_TO = "2026-08-31";
+const AUGUST_TARGETS = {
+  camila: 3562000,
+  leonardo: 4177187,
+};
 
 const insightFromSales = (currentGmv, previousGmv) => {
   if (!previousGmv) return "Sem base anterior no snapshot Partner Center.";
@@ -30,6 +42,33 @@ const handleFilter = (handles) => ({
     rich_text: { contains: handle },
   })),
 });
+const addDaysISO = (dateString, days) => {
+  const d = new Date(`${dateString}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+};
+const addMonthsISO = (dateString, months) => {
+  const d = new Date(`${dateString}T00:00:00Z`);
+  d.setUTCMonth(d.getUTCMonth() + months);
+  return d.toISOString().slice(0, 10);
+};
+const todayISO = () => new Date().toISOString().slice(0, 10);
+const minISO = (...dates) => dates.filter(Boolean).sort()[0] || "";
+
+function buildCarteiraTimeline({ from, to, handles, creatorsByHandle }) {
+  const timeline = getRetencaoCanonicalGmvTimeline({ from, to, handles });
+
+  return {
+    mode: timeline.mode,
+    label: timeline.label,
+    creatorOptions: [...handles].map((handle) => ({
+      handle,
+      nome: creatorsByHandle[handle]?.nome || handle,
+    })),
+    points: timeline.points,
+    warnings: timeline.warnings || [],
+  };
+}
 
 async function fetchAllCreators(handles = []) {
   const out = [];
@@ -135,6 +174,8 @@ export async function GET(req, { params }) {
     const defaultPeriod = defaultSnapshotPeriod();
     const fromDate = url.searchParams.get("from") || defaultPeriod.from;
     const toDate = url.searchParams.get("to") || defaultPeriod.to;
+    const previousFrom = addMonthsISO(fromDate, -1);
+    const previousTo = addMonthsISO(toDate, -1);
 
     let allCreators = [];
     const sourceStatus = {
@@ -173,16 +214,32 @@ export async function GET(req, { params }) {
     });
 
     let salesSnapshot;
+    let previousSalesSnapshot;
+    let augustSalesSnapshot = { byHandle: {}, coverage: null };
     try {
-      salesSnapshot = aggregateTikTokSnapshots({ from: fromDate, to: toDate, handles: handleSet });
+      salesSnapshot = getRetencaoCanonicalPeriod({ from: fromDate, to: toDate, handles: handleSet });
+      previousSalesSnapshot = getRetencaoCanonicalPeriod({
+        from: previousFrom,
+        to: previousTo,
+        handles: handleSet,
+      });
+      if (todayISO() >= AUGUST_GOAL_FROM) {
+        augustSalesSnapshot = getRetencaoCanonicalPeriod({
+          from: AUGUST_GOAL_FROM,
+          to: minISO(todayISO(), defaultPeriod.to, AUGUST_GOAL_TO),
+          handles: handleSet,
+        });
+      }
     } catch (e) {
       sourceStatus.sales = { ok: false, message: `Snapshot TikTok Shop/GMV indisponivel: ${e.message}` };
       console.error("[carteira] erro GMV:", e.message);
-      salesSnapshot = aggregateTikTokSnapshots({ handles: handleSet });
+      salesSnapshot = getRetencaoCanonicalPeriod({ handles: handleSet });
+      previousSalesSnapshot = { byHandle: {}, coverage: null };
     }
 
     const enriched = carteira.map((c) => {
       const sale = salesSnapshot.byHandle[c.handle] || {};
+      const previousSale = previousSalesSnapshot.byHandle?.[c.handle] || {};
       const gmv = sale.gmv || 0;
       const comissao = sale.comissao || 0;
       const commissionRate = gmv > 0 ? (comissao / gmv) * 100 : 0;
@@ -205,8 +262,8 @@ export async function GET(req, { params }) {
         directGmv: sale.directGmv || 0,
         commissionBase: sale.commissionBase || 0,
         amplifyRevenue: comissao * 0.1,
-        insight: insightFromSales(gmv, c.previousGmv || 0),
-        previousGmv: c.previousGmv || 0,
+        insight: insightFromSales(gmv, previousSale.gmv || 0),
+        previousGmv: previousSale.gmv || 0,
         lastUpdate: sale.lastUpdate || null,
       };
     }).sort((a, b) => b.gmv - a.gmv);
@@ -226,27 +283,73 @@ export async function GET(req, { params }) {
         return acc;
       }, {}),
     };
+    const previousGmvTotal = enriched.reduce((s, c) => s + (c.previousGmv || 0), 0);
+    const targetGmv = previousGmvTotal * TARGET_MULTIPLIER;
+    const targetProgressPct = targetGmv > 0 ? (summary.gmvTotal / targetGmv) * 100 : 0;
+    const augustTargetGmv = AUGUST_TARGETS[target.slug] || targetGmv;
+    const augustRealizedGmv = todayISO() < AUGUST_GOAL_FROM
+      ? 0
+      : [...handleSet].reduce((sum, handle) => sum + Number(augustSalesSnapshot.byHandle?.[handle]?.gmv || 0), 0);
+    const augustProgressPct = augustTargetGmv > 0 ? (augustRealizedGmv / augustTargetGmv) * 100 : 0;
+    const goals = {
+      period: {
+        label: "Meta do período",
+        rule: `150% do GMV do periodo anterior (${previousFrom} a ${previousTo})`,
+        period: { from: fromDate, to: toDate },
+        previousPeriod: { from: previousFrom, to: previousTo },
+        previousGmv: previousGmvTotal,
+        targetGmv,
+        realizedGmv: summary.gmvTotal,
+        progressPct: targetProgressPct,
+        gap: Math.max(0, targetGmv - summary.gmvTotal),
+        status: targetGmv <= 0 ? "Sem base anterior" : targetProgressPct >= 100 ? "Meta batida" : "Em progresso",
+      },
+      august: {
+        label: "Meta Agosto",
+        period: { from: AUGUST_GOAL_FROM, to: AUGUST_GOAL_TO },
+        targetGmv: augustTargetGmv,
+        realizedGmv: augustRealizedGmv,
+        progressPct: todayISO() < AUGUST_GOAL_FROM ? 0 : augustProgressPct,
+        gap: Math.max(0, augustTargetGmv - augustRealizedGmv),
+        status: todayISO() < AUGUST_GOAL_FROM ? "Não iniciada" : augustProgressPct >= 100 ? "Meta batida" : "Em progresso",
+        configured: Boolean(AUGUST_TARGETS[target.slug]),
+      },
+    };
+
+    const timeline = buildCarteiraTimeline({
+      from: salesSnapshot.coverage?.from || fromDate,
+      to: salesSnapshot.coverage?.to || toDate,
+      handles: handleSet,
+      creatorsByHandle,
+    });
 
     const warnings = [
       !sourceStatus.notion.ok ? sourceStatus.notion.message : null,
       !sourceStatus.sales.ok ? sourceStatus.sales.message : null,
       ...(salesSnapshot?.warnings || []),
+      ...(timeline?.warnings || []),
     ].filter(Boolean);
 
     return NextResponse.json({
       am: publicAmData(target),
       creators: enriched,
       summary,
+      goals,
+      timeline,
       sourceStatus,
       warnings,
       dataFreshness: {
-        strategy: "daily_tiktok_shop_snapshot",
+        strategy: "daily_tiktok_shop_ledger",
         filterMode: "partner_center_snapshot_cache",
+        canonicalLayer: "retencao-canonical-data",
+        canonicalDatabase: "retencao_tiktok_canonical.sqlite",
         requestedPeriod: salesSnapshot.requested,
         effectiveCoverage: salesSnapshot.coverage,
+        previousCoverage: previousSalesSnapshot.coverage,
         availablePeriods: salesSnapshot.availablePeriods,
+        dataQuality: salesSnapshot.data_quality || {},
         message:
-          "GMV e comissao vêm dos JSONs coletados no TikTok Shop Partner Center. Notion e apenas cadastro auxiliar; vencimento de contrato nao e exibido porque o snapshot Partner Center atual nao traz esse campo.",
+          "GMV, pedidos e comissao vêm da camada canonica Retencao/TikTok Shop baseada no Partner Center. Notion e apenas cadastro auxiliar; vencimento de contrato entra como dimensao anexa quando a base de contratos for conectada.",
       },
       updatedAt: new Date().toISOString(),
     });
