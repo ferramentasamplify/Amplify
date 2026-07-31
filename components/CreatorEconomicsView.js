@@ -115,7 +115,7 @@ export default function CreatorEconomicsView() {
       {error && <div className="econ-error"><strong>O painel nao carregou.</strong><span>{error}</span></div>}
       {loading && !data ? <div className="econ-loading"><i /><span>Cruzando aquisicao, formularios e retencao…</span></div> : data && <>
         <section className="metric-grid">
-          <Metric label="Creators ativos" value={integer(summary.activeCreators)} note={`${integer(summary.enteredCreators)} entraram no periodo`} />
+          <Metric label="Creators observados" value={integer(summary.observedCreators ?? summary.activeCreators)} note={`${integer(summary.enteredCreators)} apareceram pela primeira vez no relatorio`} />
           <Metric label="Com formulario" value={percent(summary.formMatchRate)} note={`${integer(summary.matchedForms)} @ encontrados na Base de Creators`} tone="blue" />
           <Metric label="GMV observado" value={money(summary.gmv)} note="Somado por fechamento mensal, sem duplicidade" tone="cyan" />
           <Metric label="Receita Amplify" value={money(summary.estimatedAmplifyRevenue)} note="10% da comissao estimada do creator" tone="green" />
@@ -131,8 +131,8 @@ export default function CreatorEconomicsView() {
 
         <section className="chart-grid">
           <article className="econ-panel">
-            <header><div><span>Retencao por mes</span><h2>Entraram, ficaram e voltaram</h2></div><small>Creator ativo = apareceu em pelo menos um snapshot do mes</small></header>
-            <div className="chart-box"><ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 640, height: 320 }}><ComposedChart data={chartData} margin={{ top: 18, right: 16, left: -8, bottom: 0 }}><CartesianGrid stroke="rgba(255,255,255,.06)" vertical={false} /><XAxis dataKey="month" tickFormatter={monthLabel} stroke="#5E6678" tick={{ fontSize: 11 }} /><YAxis stroke="#5E6678" tick={{ fontSize: 11 }} /><Tooltip content={<ChartTooltip />} /><Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} /><Bar dataKey="enteredCreators" name="Entraram" fill="#9B8CFF" radius={[5, 5, 0, 0]} /><Line dataKey="activeCreators" name="Ativos" stroke="#44D7B6" strokeWidth={3} dot={{ r: 3 }} /><Line dataKey="matchedForms" name="Com formulario" stroke="#5A8CFF" strokeWidth={2} strokeDasharray="5 4" dot={false} /><Bar dataKey="returnedCreators" name="Voltaram" fill="#FFB84B" radius={[5, 5, 0, 0]} /></ComposedChart></ResponsiveContainer></div>
+            <header><div><span>Retencao por mes</span><h2>Observados, primeiras aparicoes e retornos</h2></div><small>Observado = apareceu no relatorio acumulado do mes; nao significa vinculado agora</small></header>
+            <div className="chart-box"><ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 640, height: 320 }}><ComposedChart data={chartData} margin={{ top: 18, right: 16, left: -8, bottom: 0 }}><CartesianGrid stroke="rgba(255,255,255,.06)" vertical={false} /><XAxis dataKey="month" tickFormatter={monthLabel} stroke="#5E6678" tick={{ fontSize: 11 }} /><YAxis stroke="#5E6678" tick={{ fontSize: 11 }} /><Tooltip content={<ChartTooltip />} /><Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} /><Bar dataKey="enteredCreators" name="Primeira aparicao" fill="#9B8CFF" radius={[5, 5, 0, 0]} /><Line dataKey="activeCreators" name="Observados no mes" stroke="#44D7B6" strokeWidth={3} dot={{ r: 3 }} /><Line dataKey="matchedForms" name="Com formulario" stroke="#5A8CFF" strokeWidth={2} strokeDasharray="5 4" dot={false} /><Bar dataKey="returnedCreators" name="Voltaram" fill="#FFB84B" radius={[5, 5, 0, 0]} /></ComposedChart></ResponsiveContainer></div>
           </article>
           <article className="econ-panel">
             <header><div><span>LTV observado</span><h2>GMV vira receita Amplify</h2></div><small>Receita = 10% da comissao estimada</small></header>
@@ -142,12 +142,12 @@ export default function CreatorEconomicsView() {
 
         <section className="econ-panel source-panel">
           <header><div><span>Canal de origem</span><h2>Quem trouxe LTV, nao apenas lead</h2></div><small>Super Afiliado separado do Indique e Ganhe pela UTM cadastrada</small></header>
-          <div className="source-table-wrap"><table className="source-table"><thead><tr><th>Origem</th><th>Creators ativos</th><th>First-touch no periodo</th><th>Com formulario</th><th>GMV</th><th>Receita Amplify</th><th>LTV medio observado</th></tr></thead><tbody>{data.sourceBreakdown.map((row) => <tr key={row.key}><td><button onClick={() => { setSource(row.key); setPage(1) }}>{row.label}</button></td><td>{integer(row.creators)}</td><td>{integer(row.acquired)}</td><td>{percent(row.formMatchRate)}</td><td>{money(row.gmv)}</td><td><strong>{money(row.estimatedAmplifyRevenue)}</strong></td><td>{money(row.avgObservedLtv)}</td></tr>)}</tbody></table></div>
+          <div className="source-table-wrap"><table className="source-table"><thead><tr><th>Origem</th><th>Creators observados</th><th>First-touch no periodo</th><th>Com formulario</th><th>GMV</th><th>Receita Amplify</th><th>LTV medio observado</th></tr></thead><tbody>{data.sourceBreakdown.map((row) => <tr key={row.key}><td><button onClick={() => { setSource(row.key); setPage(1) }}>{row.label}</button></td><td>{integer(row.creators)}</td><td>{integer(row.acquired)}</td><td>{percent(row.formMatchRate)}</td><td>{money(row.gmv)}</td><td><strong>{money(row.estimatedAmplifyRevenue)}</strong></td><td>{money(row.avgObservedLtv)}</td></tr>)}</tbody></table></div>
         </section>
 
         <section className="econ-panel source-panel">
           <header><div><span>Base de aquisicao</span><h2>Nova IA versus operacao antiga</h2></div><small>AmplifyOS inclui apenas entradas nativas; imports legados foram excluidos</small></header>
-          <div className="source-table-wrap"><table className="source-table"><thead><tr><th>Sistema first-touch</th><th>Creators ativos</th><th>First-touch no periodo</th><th>Com formulario</th><th>GMV</th><th>Receita Amplify</th><th>LTV medio observado</th></tr></thead><tbody>{data.systemBreakdown.map((row) => <tr key={row.key}><td><span className="origin-tag">{row.label}</span></td><td>{integer(row.creators)}</td><td>{integer(row.acquired)}</td><td>{percent(row.formMatchRate)}</td><td>{money(row.gmv)}</td><td><strong>{money(row.estimatedAmplifyRevenue)}</strong></td><td>{money(row.avgObservedLtv)}</td></tr>)}</tbody></table></div>
+          <div className="source-table-wrap"><table className="source-table"><thead><tr><th>Sistema first-touch</th><th>Creators observados</th><th>First-touch no periodo</th><th>Com formulario</th><th>GMV</th><th>Receita Amplify</th><th>LTV medio observado</th></tr></thead><tbody>{data.systemBreakdown.map((row) => <tr key={row.key}><td><span className="origin-tag">{row.label}</span></td><td>{integer(row.creators)}</td><td>{integer(row.acquired)}</td><td>{percent(row.formMatchRate)}</td><td>{money(row.gmv)}</td><td><strong>{money(row.estimatedAmplifyRevenue)}</strong></td><td>{money(row.avgObservedLtv)}</td></tr>)}</tbody></table></div>
         </section>
 
         <section className="econ-panel creator-panel">
@@ -158,7 +158,7 @@ export default function CreatorEconomicsView() {
         </section>
 
         <footer className="econ-method">
-          <div><span>Receita, nao lucro</span><p>{data.caveats[1]}</p></div><div><span>Identidade</span><p>{data.methodology.identity} {data.methodology.form}</p></div><div><span>CAC</span><p>{data.caveats[2]}</p></div><div><span>Indique / Super</span><p>{data.caveats[7]}</p></div><div><span>Periodo e retorno</span><p>{data.caveats[5]} {data.caveats[6]}</p></div><div><span>Atualizacao</span><p>Snapshot gerado em {new Date(data.generatedAt).toLocaleString("pt-BR")}. Janela comum fechada de {date(data.period?.from)} a {date(data.period?.to)}.</p></div>
+          <div><span>Receita, nao lucro</span><p>{data.caveats[1]}</p></div><div><span>Identidade</span><p>{data.methodology.identity} {data.methodology.form}</p></div><div><span>CAC</span><p>{data.caveats[2]}</p></div><div><span>Indique / Super</span><p>{data.caveats[7]}</p></div><div><span>Contagem de creators</span><p>{data.caveats[8]}</p></div><div><span>Periodo e retorno</span><p>{data.caveats[5]} {data.caveats[6]}</p></div><div><span>Atualizacao</span><p>Snapshot gerado em {new Date(data.generatedAt).toLocaleString("pt-BR")}. Janela comum fechada de {date(data.period?.from)} a {date(data.period?.to)}.</p></div>
         </footer>
       </>}
     </div>

@@ -260,6 +260,8 @@ export async function GET(request) {
       sources: snapshot.sources,
       summary: {
         activeCreators: filtered.length,
+        observedCreators: filtered.length,
+        currentLinkedCreators: null,
         enteredCreators: entered,
         matchedForms,
         formMatchRate: percent(filtered.length, matchedForms),
@@ -293,6 +295,7 @@ export async function GET(request) {
         explicitPaidCreators: snapshot.creators.filter((row) => row.acquisition.key === 'paid-meta' && row.acquisition.attributionBasis !== 'assumed_tracking_loss').length,
         assumedPaidCreators: snapshot.creators.filter((row) => row.acquisition.key === 'paid-meta' && row.acquisition.attributionBasis === 'assumed_tracking_loss').length,
         missingAdIdentity: true,
+        partnershipStatusAvailable: false,
         commonClosedThrough,
       },
       monthly,
@@ -307,9 +310,10 @@ export async function GET(request) {
         'CAC exibido e media agregada alocada da coorte Ads Meta explicita + Origem Desconhecida assumida como Meta por perda de tracking. A suposicao e regra operacional, nao atribuicao individual comprovada; o CRM nao persiste IDs Meta.',
         'AmplifyOS considera somente origens nativas Ads Meta, WhatsApp direto e Programa Indique; imports legados sao excluidos da Nova IA.',
         'Formulario preenchido exige correspondencia exata do @ ou de um alias historico; nomes parecidos nao sao unidos.',
-        'Periodo observado inclui todo creator ativo na janela; Entraram mede o primeiro dia observado no Partner Center dentro dela.',
+        'Periodo observado inclui todo creator presente no relatorio acumulado da janela; primeira aparicao mede o primeiro dia observado no Partner Center dentro dela.',
         'Retornante = author_id com nova sequencia de dias apos pelo menos um dia ausente; dias sao datas distintas, nao o intervalo entre primeira e ultima aparicao.',
         'Super Afiliado usa membership exata no registro versionado de UTM; o restante do intake comprovado de referral fica em Indique e Ganhe.',
+        'Creators observados sao author_ids presentes no relatorio creator_gmv acumulado da janela. O export nao possui status de parceria e nao mede Vinculados agora no Partner Center.',
       ],
     }, { headers: { 'Cache-Control': 'no-store, max-age=0' } })
   } catch (error) {
