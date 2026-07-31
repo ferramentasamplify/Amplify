@@ -128,7 +128,7 @@ function GMVPanel({ audience, accent }) {
           {groups.map((group) => <div className={group.key === "sniper" ? "sniper-result" : ""} key={group.key}>
             <span>GMV final · {group.label}</span>
             <strong>{fmtMoney(group.gmv)}</strong>
-            <small>Amplify 1% · {fmtMoney(group.amplifyGain)}</small>
+            <small><a href="/hub/creator-economics" style={{ color: "#74E4B8", textDecoration: "none" }}>Ver comissão real e LTV →</a></small>
           </div>)}
         </div>
       </div>
@@ -377,7 +377,7 @@ export default function GrowthFunnelsView() {
 
           <footer className="methodology">
             <div><span>Como ler</span><p>{data.methodology.cohort}</p></div>
-            <div><span>GMV registrado</span><p>{data.methodology.creators} Ganho Amplify calculado como exatamente 1% do GMV final registrado.</p></div>
+            <div><span>GMV registrado</span><p>{data.methodology.creators} Receita Amplify e LTV usam 10% da comissão estimada real no painel CAC x LTV.</p></div>
             <div><span>Bitrix conectado</span><p>{data.methodology.brands} Leads sem vínculo determinístico permanecem apenas na entrada, sem conversão inventada.</p></div>
           </footer>
         </>}

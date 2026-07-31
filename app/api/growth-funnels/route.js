@@ -95,7 +95,7 @@ function aggregate(snapshot, audience, from, to) {
   }).map((stage, index, all) => ({
     ...stage,
     conversion: index === 0 ? null : percent(all[index - 1].value, stage.value),
-    amplifyGain: index === all.length - 1 && stage.gmv != null ? stage.gmv * 0.01 : null,
+    amplifyGain: null,
   }))
 
   const totalStages = stageValues(rows)

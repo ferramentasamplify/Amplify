@@ -284,6 +284,19 @@ export default function HubView() {
               <MiniKpi label="Gargalo" value="UTM" color="#EA1A4E" sub="creator sem campaign/adset/ad" />
             </SectionCard>
 
+            {/* CAC x LTV de Creators */}
+            <SectionCard
+              title="CAC x LTV de Creators"
+              icon="↗"
+              href="/hub/creator-economics"
+              color="#47D7A0"
+            >
+              <MiniKpi label="Identidade" value="@ + aliases" color="#9B8CFF" sub="aquisicao cruzada com Partner Center" />
+              <MiniKpi label="Receita" value="10% comissao" color="#47D7A0" sub="usa Est. commission real da tabela" />
+              <MiniKpi label="Retencao" value="Dia a dia" color="#39CFE2" sub="entrou, ficou, saiu e voltou" />
+              <MiniKpi label="CAC" value="Coorte Meta" color="#F6B84B" sub="alocacao media, sem inventar custo individual" />
+            </SectionCard>
+
             {/* Dash Aquisição */}
             <SectionCard
               title="Dashboard Aquisição"
@@ -436,6 +449,7 @@ export default function HubView() {
               { href: "/meta",               label: "Meta Ads",     icon: "📣" },
               { href: "/hub/funis",          label: "Funis Globais", icon: "⇢" },
               { href: "/hub/growth",         label: "Growth Central", icon: "🧭" },
+              { href: "/hub/creator-economics", label: "CAC x LTV Creators", icon: "↗" },
               { href: "/superafiliado",      label: "Super Afiliado", icon: "🤝" },
               { href: "/indiqueeganhe/login?next=/indiqueeganhe", label: "Indique e Ganhe", icon: "🎁" },
               { href: "/club",               label: "Amplify Club", icon: "💎" },
