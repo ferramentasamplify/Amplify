@@ -108,6 +108,7 @@ export default function CreatorEconomicsView() {
           <TrustPill ok={Boolean(data?.coverage?.dailySnapshots)}>Partner Center · {integer(data?.coverage?.dailySnapshots)} dias</TrustPill>
           <TrustPill ok>AmplifyOS nativo · {integer(data?.sources?.amplifyos?.uniqueHandles || 0)} @</TrustPill>
           <TrustPill ok>Join exato por @</TrustPill>
+          <TrustPill ok={false}>Desconhecida = Meta assumido</TrustPill>
         </div>
       </section>
 
@@ -118,7 +119,7 @@ export default function CreatorEconomicsView() {
           <Metric label="Com formulario" value={percent(summary.formMatchRate)} note={`${integer(summary.matchedForms)} @ encontrados na Base de Creators`} tone="blue" />
           <Metric label="GMV observado" value={money(summary.gmv)} note="Somado por fechamento mensal, sem duplicidade" tone="cyan" />
           <Metric label="Receita Amplify" value={money(summary.estimatedAmplifyRevenue)} note="10% da comissao estimada do creator" tone="green" />
-          {showPaid && <Metric label="CAC pago · media alocada" value={paid.acquiredCac == null ? "—" : money(paid.acquiredCac)} note={`${integer(paid.cohortCreators)} origens Ads Meta explicitas · nao e CAC individual`} tone="amber" />}
+          {showPaid && <Metric label="CAC pago · media alocada" value={paid.acquiredCac == null ? "—" : money(paid.acquiredCac)} note={`${integer(paid.cohortCreators)} creators · Meta explicito + desconhecida assumida`} tone="amber" />}
           {showPaid && <Metric label="LTV / CAC pago · agregado" value={ratio(paid.ltvCac)} note={`LTV observado medio ${paid.avgObservedLtv == null ? "—" : money(paid.avgObservedLtv)}`} tone="rose" />}
         </section>
 

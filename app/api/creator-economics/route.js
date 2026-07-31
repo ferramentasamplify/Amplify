@@ -279,10 +279,10 @@ export async function GET(request) {
         avgObservedLtv: paidAvgObservedLtv,
         ltvCac: paidLtvCac,
         lifetimeRevenue: paidLifetimeRevenue,
-        allocation: 'Media agregada alocada: gasto Meta / creators com origem Ads Meta explicita, first-touch na janela comum e @ vinculado ao Partner Center. Nao e CAC individual atribuido.',
+        allocation: 'Media agregada alocada: gasto Meta / creators com Ads Meta explicito ou Origem Desconhecida assumida como Meta por perda de tracking, first-touch na janela comum e @ vinculado ao Partner Center. Nao e CAC individual atribuido.',
         contracts: {
           metaPlatformCpl: { value: meta.spend !== null && meta.results ? round(meta.spend / meta.results) : null, status: meta.spend === null ? 'unavailable' : 'observed', basis: 'resultados da plataforma Meta; nao sao leads CRM validados' },
-          paidCohortCac: { value: paidCac, status: paidCac == null ? 'unavailable' : 'estimated', attribution: 'allocated_average', scope: 'agregado da coorte explicitamente Ads Meta vinculada a retencao' },
+          paidCohortCac: { value: paidCac, status: paidCac == null ? 'unavailable' : 'estimated', attribution: 'allocated_average', scope: 'agregado da coorte Ads Meta explicita + Origem Desconhecida assumida como Meta, vinculada a retencao' },
           attributedCac: { value: null, status: 'unavailable', reason: 'CRM nao persiste campaign_id/adset_id/ad_id/click_id ate author_id' },
           individualCac: { value: null, status: 'unavailable', reason: 'sem chave deterministica entre custo Meta e creator' },
         },
@@ -290,7 +290,8 @@ export async function GET(request) {
       },
       quality: {
         unknownOriginCreators: snapshot.creators.filter((row) => row.acquisition.key === 'unknown').length,
-        explicitPaidCreators: snapshot.creators.filter((row) => row.acquisition.key === 'paid-meta').length,
+        explicitPaidCreators: snapshot.creators.filter((row) => row.acquisition.key === 'paid-meta' && row.acquisition.attributionBasis !== 'assumed_tracking_loss').length,
+        assumedPaidCreators: snapshot.creators.filter((row) => row.acquisition.key === 'paid-meta' && row.acquisition.attributionBasis === 'assumed_tracking_loss').length,
         missingAdIdentity: true,
         commonClosedThrough,
       },
@@ -303,7 +304,7 @@ export async function GET(request) {
       caveats: [
         'Receita Amplify estimada = 10% da Est. commission do Partner Center.',
         'Est. commission inclui pedidos que podem ser reembolsados; nao representa lucro liquido contabil.',
-        'CAC exibido e media agregada alocada da coorte com origem Ads Meta explicita; CAC individual/campanha/anuncio esta indisponivel porque o CRM nao persiste IDs Meta.',
+        'CAC exibido e media agregada alocada da coorte Ads Meta explicita + Origem Desconhecida assumida como Meta por perda de tracking. A suposicao e regra operacional, nao atribuicao individual comprovada; o CRM nao persiste IDs Meta.',
         'AmplifyOS considera somente origens nativas Ads Meta, WhatsApp direto e Programa Indique; imports legados sao excluidos da Nova IA.',
         'Formulario preenchido exige correspondencia exata do @ ou de um alias historico; nomes parecidos nao sao unidos.',
         'Periodo observado inclui todo creator ativo na janela; Entraram mede o primeiro dia observado no Partner Center dentro dela.',

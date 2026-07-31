@@ -60,7 +60,7 @@ function classify(machine, indique, sniper, form, amplifyos) {
     const origin = normalize(machine.origin)
     if (/programa indique/.test(origin)) return sourceRecord(machine, { key: 'referral', label: 'Indique e Ganhe', detail: machine.origin, evidence: 'Origem · Novos Creators' }, 'notion', 'Notion / Maquina antiga')
     if (/ads meta/.test(origin)) return sourceRecord(machine, { key: 'paid-meta', label: 'Meta Ads', detail: machine.origin, evidence: 'Origem explicita · Novos Creators' }, 'notion', 'Notion / Maquina antiga')
-    if (/origem desconhecida/.test(origin)) return sourceRecord(machine, { key: 'unknown', label: 'Origem nao identificada', detail: machine.origin, evidence: 'Origem desconhecida · Novos Creators' }, 'notion', 'Notion / Maquina antiga')
+    if (/origem desconhecida/.test(origin)) return sourceRecord(machine, { key: 'paid-meta', label: 'Meta Ads', detail: machine.origin, evidence: 'Atribuicao assumida · tracking Meta perdido', attributionBasis: 'assumed_tracking_loss' }, 'notion', 'Notion / Maquina antiga')
     if (/organico meta/.test(origin)) return sourceRecord(machine, { key: 'instagram-organic', label: 'Instagram organico', detail: machine.origin, evidence: 'Origem · Novos Creators' }, 'notion', 'Notion / Maquina antiga')
     if (/organico tiktok/.test(origin)) return sourceRecord(machine, { key: 'tiktok-organic', label: 'TikTok organico', detail: machine.origin, evidence: 'Origem · Novos Creators' }, 'notion', 'Notion / Maquina antiga')
     if (origin) return sourceRecord(machine, { key: 'other', label: 'Outros canais', detail: machine.origin, evidence: 'Origem · Novos Creators' }, 'notion', 'Notion / Maquina antiga')
@@ -206,8 +206,8 @@ function main() {
       creatorCommission: 'Campo Est. commission (pre_estimated_commission) do Partner Center.',
       amplifyRevenue: '10% da comissao estimada do creator; nao e 1% fixo do GMV.',
       form: 'Correspondencia exata do @ com a Base de Creators; sem fuzzy match.',
-      source: 'Data e sistema de first-touch usam a entrada mais antiga. Canal usa a evidencia conhecida mais antiga; origem desconhecida permanece unknown e nunca herda paid.',
-      cac: 'CPL Meta e observado na plataforma. CAC pago e media agregada alocada somente entre origens Ads Meta explicitas na janela comum; CAC atribuido individual/campanha/anuncio esta indisponivel sem IDs Meta no CRM.',
+      source: 'Data e sistema de first-touch usam a entrada mais antiga. Por regra operacional definida em 2026-07-31, registros com Origem Desconhecida sao classificados como Ads Meta por perda de tracking, mantendo attributionBasis=assumed_tracking_loss para nao confundir com evidencia explicita.',
+      cac: 'CPL Meta e observado na plataforma. CAC pago e media agregada alocada entre origens Ads Meta explicitas e Origem Desconhecida assumida como Meta na janela comum; CAC atribuido individual/campanha/anuncio continua indisponivel sem IDs Meta no CRM.',
       ltv: 'GMV observado e somado pelo ultimo snapshot mensal. Receita Amplify estimada e 10% da Est. commission; nao e comissao liquidada nem lucro contabil.',
       returning: 'Retornante e o mesmo author_id em nova sequencia apos pelo menos um dia ausente; activeDays conta datas distintas.',
       referral: 'Super Afiliado usa membership exata no registro UTM 2026-07-31-v1; demais linhas do intake comprovado de referral ficam em Indique e Ganhe.',
