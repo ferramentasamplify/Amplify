@@ -6,6 +6,7 @@ export const runtime = 'nodejs'
 
 const LIVE_PATH = '/var/lib/amplify-hub/creator-economics-live.json'
 const DAILY_LEDGER_MONTHLY = '/root/.openclaw/workspaces/retencao-gabriel/work/tiktok-shop-reports/creator-daily-ledger/monthly'
+const PORTFOLIO_ANALYTICS_PATH = '/root/.openclaw/workspaces/retencao-gabriel/work/tiktok-shop-reports/creator-daily-ledger/meta/creator-portfolio-analytics.json'
 const META_ENV_PATH = '/root/.openclaw/workspaces/analista-trafego/.env'
 const META_API_VERSION = 'v19.0'
 const metaCache = new Map()
@@ -83,6 +84,59 @@ async function readDailyAffiliation(from, to) {
     missingDays,
     complete: missingDays.length === 0 && series.every((row) => row.complete),
     series,
+  }
+}
+async function readPortfolioAnalytics(from, to) {
+  const payload = JSON.parse(await readFile(PORTFOLIO_ANALYTICS_PATH, 'utf8'))
+  if (payload.schemaVersion !== 1 || !Array.isArray(payload.dailyTransitions) || !Array.isArray(payload.monthlyPortfolio)) {
+    throw new Error('analytics de carteira invalidos')
+  }
+  const fromDay = `${from}-01`
+  const toDay = lastDay(to)
+  const daily = payload.dailyTransitions.filter((row) => row.date >= fromDay && row.date <= toDay)
+  const monthly = payload.monthlyPortfolio.filter((row) => row.month >= from && row.month <= to)
+  if (!daily.length || !monthly.length) throw new Error(`analytics de carteira sem dados entre ${from} e ${to}`)
+  for (const row of daily) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(row.date || '') || !Number.isInteger(row.activeCreators) || row.activeCreators <= 0) {
+      throw new Error(`transicao diaria invalida: ${row.date || 'sem data'}`)
+    }
+  }
+  for (const row of monthly) {
+    if (!/^\d{4}-\d{2}$/.test(row.month || '') || !Number.isFinite(row.totalGmv) || !Array.isArray(row.topCreators)) {
+      throw new Error(`carteira mensal invalida: ${row.month || 'sem mes'}`)
+    }
+  }
+  const transitionDays = daily.filter((row) => Number.isInteger(row.exits))
+  const gmvCompleteDays = transitionDays.filter((row) => row.gmvWindowComplete)
+  const exitedIds = new Set(transitionDays.flatMap((row) => Array.isArray(row.exitedCreatorIds) ? row.exitedCreatorIds : []))
+  const sum = (key, rows = transitionDays) => rows.reduce((total, row) => total + (Number(row[key]) || 0), 0)
+  const totalExits = sum('exits')
+  const priorCreatorDays = transitionDays.reduce((total, row) => total + Math.max(0, row.activeCreators - (Number(row.net) || 0)), 0)
+  const selectedMonth = monthly.at(-1)
+  return {
+    source: payload.source,
+    timezone: payload.timezone,
+    definitions: payload.definitions,
+    range: { from: daily[0].date, to: daily.at(-1).date, days: daily.length },
+    summary: {
+      firstAppearances: sum('firstAppearances'),
+      returns: sum('returns'),
+      additions: sum('additions'),
+      exitEvents: totalExits,
+      uniqueExitedCreators: exitedIds.size,
+      net: sum('net'),
+      exitRatePerCreatorDay: percent(priorCreatorDays, totalExits),
+      exitedGmvPrior30d: round(sum('exitedGmvPrior30d', gmvCompleteDays)),
+      gmvCompleteDays: gmvCompleteDays.length,
+      transitionDays: transitionDays.length,
+      latestMonth: selectedMonth.month,
+      latestMonthGmv: selectedMonth.totalGmv,
+      latestMonthSellers: selectedMonth.creatorsWithGmv,
+      latestMonthMedianGmv: selectedMonth.medianGmvPerSeller,
+      latestMonthTop5Share: selectedMonth.top5Share,
+    },
+    daily: daily.map(({ exitedCreatorIds, topExits, ...row }) => row),
+    monthly,
   }
 }
 function metaResultValue(row) {
@@ -221,6 +275,7 @@ export async function GET(request) {
     const monthKeys = monthsBetween(from, to)
     const monthSet = new Set(monthKeys)
     const affiliationDaily = await readDailyAffiliation(from, to)
+    const portfolioAnalytics = await readPortfolioAnalytics(from, to)
 
     const activeRows = snapshot.creators.map((creator) => {
       const monthly = creator.monthly.filter((month) => monthSet.has(month.month))
@@ -310,6 +365,7 @@ export async function GET(request) {
       methodology: snapshot.methodology,
       sources: snapshot.sources,
       affiliationDaily,
+      portfolioAnalytics,
       summary: {
         activeCreators: filtered.length,
         observedCreators: filtered.length,
@@ -367,6 +423,8 @@ export async function GET(request) {
         'Super Afiliado usa membership exata no registro versionado de UTM; o restante do intake comprovado de referral fica em Indique e Ganhe.',
         'Creators observados sao author_ids presentes no relatorio creator_gmv acumulado da janela. O export nao possui status de parceria e nao mede Vinculados agora no Partner Center.',
         'Agenciados por dia vem do relatorio Criador consultado com inicio e fim iguais para cada data. Creators com GMV no dia e uma serie separada e nao substitui a contagem de agenciados.',
+        'Saida observada = author_id presente no dia anterior e ausente no dia atual. Nao e evento oficial de desvinculacao; uma volta posterior aparece como retorno.',
+        'GMV previo 30d associado as saidas soma o GMV dos 30 dias fechados anteriores a cada evento. Mede potencial que saiu da base observada, nao perda contabil nem projecao contrafactual.',
       ],
     }, { headers: { 'Cache-Control': 'no-store, max-age=0' } })
   } catch (error) {
