@@ -5,6 +5,7 @@ export const revalidate = 0
 export const runtime = 'nodejs'
 
 const LIVE_PATH = '/var/lib/amplify-hub/creator-economics-live.json'
+const DAILY_LEDGER_MONTHLY = '/root/.openclaw/workspaces/retencao-gabriel/work/tiktok-shop-reports/creator-daily-ledger/monthly'
 const META_ENV_PATH = '/root/.openclaw/workspaces/analista-trafego/.env'
 const META_API_VERSION = 'v19.0'
 const metaCache = new Map()
@@ -35,6 +36,55 @@ function monthsBetween(from, to) {
   return result
 }
 function inDateRange(date, from, to) { return Boolean(date && date >= `${from}-01` && date <= lastDay(to)) }
+function nextDay(value) {
+  const cursor = new Date(`${value}T00:00:00Z`)
+  cursor.setUTCDate(cursor.getUTCDate() + 1)
+  return cursor.toISOString().slice(0, 10)
+}
+async function readDailyAffiliation(from, to) {
+  const rows = (await Promise.all(monthsBetween(from, to).map(async (month) => {
+    const file = `${DAILY_LEDGER_MONTHLY}/${month}/creator_daily_counts__${month}.json`
+    const payload = JSON.parse(await readFile(file, 'utf8'))
+    if (!Array.isArray(payload)) throw new Error(`serie diaria invalida em ${month}`)
+    return payload
+  }))).flat().filter((row) => row.day >= `${from}-01` && row.day <= lastDay(to)).sort((a, b) => a.day.localeCompare(b.day))
+  if (!rows.length) throw new Error(`ledger diario sem dados entre ${from} e ${to}`)
+  for (const row of rows) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(row.day || '') || !Number.isInteger(row.active_creators) || row.active_creators <= 0 || row.downloaded_count !== row.active_creators) {
+      throw new Error(`linha diaria invalida no ledger: ${row.day || 'sem data'}`)
+    }
+  }
+  const missingDays = []
+  for (let day = rows[0].day; day <= rows.at(-1).day; day = nextDay(day)) {
+    if (!rows.some((row) => row.day === day)) missingDays.push(day)
+  }
+  const series = rows.map((row) => ({
+    date: row.day,
+    affiliatedCreators: row.active_creators,
+    gmvCreators: Number(row.positive_gmv_creators) || 0,
+    complete: row.downloaded_count === row.active_creators,
+  }))
+  const latest = series.at(-1)
+  const previous = series.at(-2) || null
+  const minimum = series.reduce((best, row) => row.affiliatedCreators < best.affiliatedCreators ? row : best, series[0])
+  const maximum = series.reduce((best, row) => row.affiliatedCreators > best.affiliatedCreators ? row : best, series[0])
+  const delta = previous ? latest.affiliatedCreators - previous.affiliatedCreators : null
+  const first = series[0]
+  return {
+    source: 'TikTok Shop Partner Center · relatorio Criador · um dia por consulta',
+    timezone: 'America/Sao_Paulo',
+    grain: 'one_calendar_day',
+    range: { from: first.date, to: latest.date, days: series.length },
+    latest: { ...latest, delta, deltaPercent: previous?.affiliatedCreators ? round(delta / previous.affiliatedCreators * 100) : null },
+    minimum,
+    maximum,
+    average: round(series.reduce((sum, row) => sum + row.affiliatedCreators, 0) / series.length),
+    growthSinceStart: latest.affiliatedCreators - first.affiliatedCreators,
+    missingDays,
+    complete: missingDays.length === 0 && series.every((row) => row.complete),
+    series,
+  }
+}
 function metaResultValue(row) {
   const results = Array.isArray(row.results) ? row.results : []
   const resultValues = results.flatMap((result) => Array.isArray(result.values) ? result.values : [])
@@ -170,6 +220,7 @@ export async function GET(request) {
     const sort = url.searchParams.get('sort') || 'revenue'
     const monthKeys = monthsBetween(from, to)
     const monthSet = new Set(monthKeys)
+    const affiliationDaily = await readDailyAffiliation(from, to)
 
     const activeRows = snapshot.creators.map((creator) => {
       const monthly = creator.monthly.filter((month) => monthSet.has(month.month))
@@ -258,6 +309,7 @@ export async function GET(request) {
       filters: { source: sourceFilter, query, sort },
       methodology: snapshot.methodology,
       sources: snapshot.sources,
+      affiliationDaily,
       summary: {
         activeCreators: filtered.length,
         observedCreators: filtered.length,
@@ -314,6 +366,7 @@ export async function GET(request) {
         'Retornante = author_id com nova sequencia de dias apos pelo menos um dia ausente; dias sao datas distintas, nao o intervalo entre primeira e ultima aparicao.',
         'Super Afiliado usa membership exata no registro versionado de UTM; o restante do intake comprovado de referral fica em Indique e Ganhe.',
         'Creators observados sao author_ids presentes no relatorio creator_gmv acumulado da janela. O export nao possui status de parceria e nao mede Vinculados agora no Partner Center.',
+        'Agenciados por dia vem do relatorio Criador consultado com inicio e fim iguais para cada data. Creators com GMV no dia e uma serie separada e nao substitui a contagem de agenciados.',
       ],
     }, { headers: { 'Cache-Control': 'no-store, max-age=0' } })
   } catch (error) {
