@@ -51,7 +51,7 @@ async function readDailyAffiliation(from, to) {
   }))).flat().filter((row) => row.day >= `${from}-01` && row.day <= lastDay(to)).sort((a, b) => a.day.localeCompare(b.day))
   if (!rows.length) throw new Error(`ledger diario sem dados entre ${from} e ${to}`)
   for (const row of rows) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(row.day || '') || !Number.isInteger(row.active_creators) || row.active_creators <= 0 || row.downloaded_count !== row.active_creators || !Number.isFinite(row.gmv_total)) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(row.day || '') || !Number.isInteger(row.active_creators) || row.active_creators <= 0 || row.downloaded_count !== row.active_creators || !Number.isFinite(row.gmv_total) || !Number.isFinite(row.estimated_creator_commission)) {
       throw new Error(`linha diaria invalida no ledger: ${row.day || 'sem data'}`)
     }
   }
@@ -64,6 +64,8 @@ async function readDailyAffiliation(from, to) {
     affiliatedCreators: row.active_creators,
     gmvCreators: Number(row.positive_gmv_creators) || 0,
     dailyGmv: row.gmv_total,
+    dailyEstimatedCreatorCommission: row.estimated_creator_commission,
+    dailyAmplifyRevenue: round(row.estimated_creator_commission * 0.10),
     complete: row.downloaded_count === row.active_creators,
   }))
   const latest = series.at(-1)
@@ -160,37 +162,63 @@ async function readMetaRange(fromDate, toDate) {
     const from = fromDate
     const to = toDate
     const rows = []
+    const dailyRows = []
+    const fetchMetaPages = async (params, month) => {
+      const output = []
+      let next = `https://graph.facebook.com/${META_API_VERSION}/${env.META_AD_ACCOUNT_ID}/insights?${params}`
+      for (let page = 0; next && page < 8; page += 1) {
+        const response = await fetch(next, { cache: 'no-store', signal: AbortSignal.timeout(20_000) })
+        if (!response.ok) throw new Error(`Meta Graph respondeu ${response.status} em ${month}`)
+        const payload = await response.json()
+        output.push(...(Array.isArray(payload.data) ? payload.data : []))
+        next = payload.paging?.next || null
+      }
+      return output
+    }
     for (const month of monthsBetween(fromMonth, toMonth)) {
       const monthFrom = month === fromMonth ? from : `${month}-01`
       const monthTo = month === toMonth ? to : lastDay(month)
-      const params = new URLSearchParams({
+      const aggregateParams = new URLSearchParams({
         access_token: env.META_ACCESS_TOKEN,
         fields: 'ad_id,ad_name,campaign_id,campaign_name,spend,results,actions',
         time_range: JSON.stringify({ since: monthFrom, until: monthTo }),
         level: 'ad',
         limit: '500',
       })
-      let next = `https://graph.facebook.com/${META_API_VERSION}/${env.META_AD_ACCOUNT_ID}/insights?${params}`
-      for (let page = 0; next && page < 8; page += 1) {
-        const response = await fetch(next, { cache: 'no-store', signal: AbortSignal.timeout(20_000) })
-        if (!response.ok) throw new Error(`Meta Graph respondeu ${response.status} em ${month}`)
-        const payload = await response.json()
-        rows.push(...(Array.isArray(payload.data) ? payload.data : []))
-        next = payload.paging?.next || null
-      }
+      const dailyParams = new URLSearchParams({
+        access_token: env.META_ACCESS_TOKEN,
+        fields: 'campaign_id,campaign_name,spend,date_start,date_stop',
+        time_range: JSON.stringify({ since: monthFrom, until: monthTo }),
+        time_increment: '1',
+        level: 'campaign',
+        limit: '500',
+      })
+      const [aggregateMonthRows, dailyMonthRows] = await Promise.all([
+        fetchMetaPages(aggregateParams, month),
+        fetchMetaPages(dailyParams, month),
+      ])
+      rows.push(...aggregateMonthRows)
+      dailyRows.push(...dailyMonthRows)
     }
     const creatorRows = rows.filter((row) => !/marcas?/i.test(row.campaign_name || ''))
+    const creatorDailyRows = dailyRows.filter((row) => !/marcas?/i.test(row.campaign_name || ''))
+    const dailySpend = new Map()
+    for (const row of creatorDailyRows) dailySpend.set(row.date_start, round((dailySpend.get(row.date_start) || 0) + (Number(row.spend) || 0)))
+    const daily = []
+    for (let day = from; day <= to; day = nextDay(day)) daily.push({ date: day, trafficPaidCost: round(dailySpend.get(day) || 0) })
     const value = {
       source: 'Meta Ads ao vivo', stale: false, error: null, from, to,
       spend: round(creatorRows.reduce((sum, row) => sum + (Number(row.spend) || 0), 0)),
       results: round(creatorRows.reduce((sum, row) => sum + metaResultValue(row), 0)),
       ads: creatorRows.length,
+      campaigns: new Set(creatorDailyRows.map((row) => row.campaign_id)).size,
+      daily,
       generatedAt: new Date().toISOString(),
     }
     metaCache.set(cacheKey, { cachedAt: Date.now(), value })
     return value
   } catch (error) {
-    const value = { source: 'Meta Ads ao vivo', stale: true, error: error.message, spend: null, results: null, ads: 0, generatedAt: null }
+    const value = { source: 'Meta Ads ao vivo', stale: true, error: error.message, spend: null, results: null, ads: 0, campaigns: 0, daily: [], generatedAt: null }
     metaCache.set(cacheKey, { cachedAt: Date.now(), value })
     return value
   }
@@ -336,6 +364,91 @@ export async function GET(request) {
     const allTotals = sumMetrics(activeRows)
     const sourceBreakdown = reconcileEstimatedRevenue(sourceAggregate(activeRows), allTotals.estimatedAmplifyRevenue)
     const systemBreakdown = reconcileEstimatedRevenue(systemAggregate(activeRows), allTotals.estimatedAmplifyRevenue)
+
+    const metaDailyByDate = new Map((meta.daily || []).map((row) => [row.date, row.trafficPaidCost]))
+    let cumulativeRevenue = 0
+    let cumulativeKnownCost = 0
+    const profitabilityDaily = affiliationDaily.series.map((row) => {
+      const amplifyRevenue = round(row.dailyAmplifyRevenue)
+      const trafficPaidCost = meta.stale ? null : round(metaDailyByDate.get(row.date) || 0)
+      const knownCost = trafficPaidCost
+      const resultAfterKnownCosts = knownCost == null ? null : round(amplifyRevenue - knownCost)
+      cumulativeRevenue = round(cumulativeRevenue + amplifyRevenue)
+      if (knownCost != null) cumulativeKnownCost = round(cumulativeKnownCost + knownCost)
+      return {
+        date: row.date,
+        estimatedCreatorCommission: row.dailyEstimatedCreatorCommission,
+        amplifyRevenue,
+        trafficPaidCost,
+        knownCost,
+        resultAfterKnownCosts,
+        knownMargin: amplifyRevenue && resultAfterKnownCosts != null ? round(resultAfterKnownCosts / amplifyRevenue * 100) : null,
+        cumulativeRevenue,
+        cumulativeKnownCost: knownCost == null ? null : cumulativeKnownCost,
+        cumulativeResultAfterKnownCosts: knownCost == null ? null : round(cumulativeRevenue - cumulativeKnownCost),
+      }
+    })
+    const profitabilityMonthly = portfolioAnalytics.monthly.map((month) => {
+      const dailyRows = profitabilityDaily.filter((row) => row.date.startsWith(month.month))
+      const amplifyRevenue = round(dailyRows.reduce((sum, row) => sum + row.amplifyRevenue, 0))
+      const knownCost = meta.stale ? null : round(dailyRows.reduce((sum, row) => sum + (row.knownCost || 0), 0))
+      const resultAfterKnownCosts = knownCost == null ? null : round(amplifyRevenue - knownCost)
+      return {
+        month: month.month,
+        estimatedCreatorCommission: round(dailyRows.reduce((sum, row) => sum + row.estimatedCreatorCommission, 0)),
+        amplifyRevenue,
+        trafficPaidCost: knownCost,
+        knownCost,
+        resultAfterKnownCosts,
+        knownMargin: amplifyRevenue && resultAfterKnownCosts != null ? round(resultAfterKnownCosts / amplifyRevenue * 100) : null,
+      }
+    })
+    const profitabilityByOrigin = sourceBreakdown.map((item) => {
+      const knownCost = item.key === 'paid-meta' && meta.spend != null ? round(meta.spend) : null
+      const resultAfterKnownCosts = knownCost == null ? null : round(item.estimatedAmplifyRevenue - knownCost)
+      return {
+        key: item.key,
+        label: item.label,
+        amplifyRevenue: item.estimatedAmplifyRevenue,
+        knownCost,
+        resultAfterKnownCosts,
+        knownMargin: item.estimatedAmplifyRevenue && resultAfterKnownCosts != null ? round(resultAfterKnownCosts / item.estimatedAmplifyRevenue * 100) : null,
+        costStatus: knownCost == null ? 'pending' : 'observed',
+        costBasis: item.key === 'paid-meta' ? 'Meta Ads ao vivo no periodo comum' : 'Custo da origem ainda nao cadastrado',
+      }
+    })
+    const profitabilityRevenue = round(profitabilityDaily.reduce((sum, row) => sum + row.amplifyRevenue, 0))
+    const profitabilityKnownCost = meta.stale ? null : round(profitabilityDaily.reduce((sum, row) => sum + (row.knownCost || 0), 0))
+    const profitabilityResult = profitabilityKnownCost == null ? null : round(profitabilityRevenue - profitabilityKnownCost)
+    const profitability = {
+      scope: 'global',
+      status: 'partial',
+      period: { from: affiliationDaily.range.from, to: affiliationDaily.range.to, days: affiliationDaily.range.days, timezone: affiliationDaily.timezone },
+      originPeriod: { from: commonFrom, to: commonClosedThrough, timezone: affiliationDaily.timezone },
+      summary: {
+        amplifyRevenue: profitabilityRevenue,
+        knownCost: profitabilityKnownCost,
+        resultAfterKnownCosts: profitabilityResult,
+        knownMargin: profitabilityRevenue && profitabilityResult != null ? round(profitabilityResult / profitabilityRevenue * 100) : null,
+        registeredCostCategories: 1,
+        pendingCostCategories: 3,
+      },
+      daily: profitabilityDaily,
+      monthly: profitabilityMonthly,
+      byOrigin: profitabilityByOrigin,
+      costRegistry: [
+        { key: 'traffic-paid', label: 'Trafego pago', status: meta.stale ? 'unavailable' : 'observed', amount: profitabilityKnownCost, source: meta.source, grain: 'daily' },
+        { key: 'ai', label: 'IA e automacoes', status: 'pending', amount: null, source: null, grain: null },
+        { key: 'referral', label: 'Indique e Ganhe', status: 'pending', amount: null, source: null, grain: null },
+        { key: 'other', label: 'Outros custos', status: 'pending', amount: null, source: null, grain: null },
+      ],
+      definitions: {
+        revenue: 'Receita Amplify estimada = 10% da comissao estimada do creator no Partner Center.',
+        knownCost: 'Soma apenas categorias com valor e data comprovados. Hoje: trafego pago Meta.',
+        result: 'Receita Amplify estimada menos custos conhecidos. Nao e lucro liquido enquanto houver custos pendentes.',
+        origin: 'Custos por origem so sao exibidos quando existe atribuicao comprovada. Valores ausentes permanecem pendentes, nunca zero.',
+      },
+    }
     const entered = filtered.filter((row) => row.enteredInRange).length
     const matchedForms = filtered.filter((row) => row.form.matched).length
     const returned = filtered.filter((row) => row.returnedInRange).length
@@ -367,6 +480,7 @@ export async function GET(request) {
       sources: snapshot.sources,
       affiliationDaily,
       portfolioAnalytics,
+      profitability,
       summary: {
         activeCreators: filtered.length,
         observedCreators: filtered.length,
@@ -426,6 +540,7 @@ export async function GET(request) {
         'Agenciados por dia vem do relatorio Criador consultado com inicio e fim iguais para cada data. Creators com GMV no dia e uma serie separada e nao substitui a contagem de agenciados.',
         'Saida observada = author_id presente no dia anterior e ausente no dia atual. Nao e evento oficial de desvinculacao; uma volta posterior aparece como retorno.',
         'GMV previo 30d associado as saidas soma o GMV dos 30 dias fechados anteriores a cada evento. Mede potencial que saiu da base observada, nao perda contabil nem projecao contrafactual.',
+        'Resultado apos custos conhecidos subtrai apenas categorias comprovadas no periodo. Hoje inclui trafego pago Meta; IA, Indique e Ganhe e outros custos permanecem pendentes e nao sao tratados como zero.',
       ],
     }, { headers: { 'Cache-Control': 'no-store, max-age=0' } })
   } catch (error) {
