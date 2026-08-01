@@ -11,6 +11,7 @@ const percent = (value) => `${Number(value || 0).toLocaleString("pt-BR", { maxim
 const ratio = (value) => value == null ? "—" : Number(value) > 0 && Number(value) < 0.01 ? "<0,01x" : `${Number(value).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}x`
 const date = (value) => value ? new Date(`${value.slice(0, 10)}T12:00:00`).toLocaleDateString("pt-BR") : "—"
 const monthLabel = (value) => value ? new Date(`${value}-15T12:00:00`).toLocaleDateString("pt-BR", { month: "short", year: "2-digit" }).replace(" de ", " ") : ""
+const originLabel = (acquisition) => acquisition?.key === "unknown" ? "Meta Ads + tracking perdido" : acquisition?.label
 
 function Metric({ label, value, note, tone = "violet" }) {
   return <div className={`econ-metric ${tone}`}><span>{label}</span><strong>{value}</strong><small>{note}</small></div>
@@ -59,7 +60,7 @@ function signedInteger(value) {
 function CreatorDetail({ creator }) {
   return <div className="creator-detail">
     <div className="detail-evidence">
-      <div><span>Origem atribuida</span><strong>{creator.acquisition.label}</strong><small>{creator.acquisition.evidence}{creator.acquisition.detail ? ` · ${creator.acquisition.detail}` : ""}</small></div>
+      <div><span>Origem atribuida</span><strong>{originLabel(creator.acquisition)}</strong><small>{creator.acquisition.key === "unknown" ? "Regra operacional: sem origem identificada = Meta" : creator.acquisition.evidence}{creator.acquisition.detail ? ` · ${creator.acquisition.detail}` : ""}</small></div>
       <div><span>Base de aquisicao</span><strong>{creator.acquisition.systemLabel}</strong><small>First-touch em {date(creator.acquisition.entryAt)}</small></div>
       <div><span>Formulario</span><strong>{creator.form.matched ? "Encontrado" : "Nao encontrado"}</strong><small>{creator.form.matched ? `${creator.form.channel || "Canal nao preenchido"} · ${date(creator.form.createdAt)}` : "Sem correspondencia exata do @"}</small></div>
       <div><span>Historico de @</span><strong>{creator.aliases.length}</strong><small>{creator.aliases.map((alias) => `@${alias}`).join(" · ")}</small></div>
@@ -151,10 +152,10 @@ export default function CreatorEconomicsView() {
         <div className="month-control"><label>Atividade desde<input type="month" value={from} min={data?.coverage?.from?.slice(0, 7)} max={to} onChange={(event) => { setFrom(event.target.value); setPage(1) }} /></label><span>→</span><label>Ate<input type="month" value={to} min={from} max={data?.coverage?.to?.slice(0, 7)} onChange={(event) => { setTo(event.target.value); setPage(1) }} /></label></div>
         <div className="trust-row">
           <TrustPill ok={!paid.meta?.stale}>Meta {paid.meta?.stale ? "indisponivel" : "ao vivo"}</TrustPill>
-          <TrustPill ok={Boolean(data?.coverage?.dailySnapshots)}>GMV acumulado · {integer(data?.coverage?.dailySnapshots)} snapshots</TrustPill>
+          <TrustPill ok={Boolean(affiliation.range?.days)}>GMV diario canonico · {integer(affiliation.range?.days)} dias</TrustPill>
           <TrustPill ok>AmplifyOS nativo · {integer(data?.sources?.amplifyos?.uniqueHandles || 0)} @</TrustPill>
           <TrustPill ok>Join exato por @</TrustPill>
-          <TrustPill ok={false}>Desconhecida = Meta assumido</TrustPill>
+          <TrustPill ok>Desconhecida incluida em Meta</TrustPill>
         </div>
       </section>
 
@@ -284,7 +285,7 @@ export default function CreatorEconomicsView() {
               <header><div><span>Rentabilidade por origem</span><h3>Receita e custo conhecido de cada canal</h3></div><small>Origem: {date(profitability.originPeriod?.from)} a {date(profitability.originPeriod?.to)} · custo ausente nunca vira zero</small></header>
               <div className="profit-origin-layout">
                 <div className="profit-origin-chart"><ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 760, height: 390 }}><ComposedChart layout="vertical" data={originProfitability.slice(0, 10)} margin={{ top: 8, right: 18, left: 12, bottom: 0 }}><CartesianGrid stroke="rgba(255,255,255,.05)" horizontal={false} /><XAxis type="number" tickFormatter={compactMoney} stroke="#596273" tick={{ fontSize: 9 }} /><YAxis type="category" dataKey="label" width={135} stroke="#70798A" tick={{ fontSize: 9 }} /><Tooltip content={<ProfitabilityTooltip />} /><Legend wrapperStyle={{ fontSize: 10, paddingTop: 10 }} /><Bar dataKey="amplifyRevenue" name="Receita Amplify" fill="#7165D6" radius={[0, 5, 5, 0]} /><Bar dataKey="knownCost" name="Custo conhecido" fill="#C48A30" radius={[0, 5, 5, 0]} /></ComposedChart></ResponsiveContainer></div>
-                <div className="origin-profit-table">{originProfitability.slice(0, 10).map((item) => <div key={item.key}><span>{item.label}</span><strong>{compactMoney(item.amplifyRevenue)}</strong><b className={item.costStatus}>{item.knownCost == null ? "Custo pendente" : `Custo ${compactMoney(item.knownCost)}`}</b><em>{item.resultAfterKnownCosts == null ? "Resultado indisponivel" : `Resultado ${compactMoney(item.resultAfterKnownCosts)}`}</em></div>)}</div>
+                <div className="origin-profit-table">{originProfitability.slice(0, 10).map((item) => <div key={item.key}><span>{item.label}</span><strong>GMV {compactMoney(item.gmv)}</strong><small>Receita Amplify {compactMoney(item.amplifyRevenue)}</small><b className={item.costStatus}>{item.knownCost == null ? "Custo pendente" : `Custo ${compactMoney(item.knownCost)}`}</b><em>{item.resultAfterKnownCosts == null ? "Resultado indisponivel" : `Resultado ${compactMoney(item.resultAfterKnownCosts)}`}</em></div>)}</div>
               </div>
             </article>
           </div>
@@ -347,16 +348,16 @@ export default function CreatorEconomicsView() {
         <section className="metric-grid">
           <Metric label="Creators observados" value={integer(summary.observedCreators ?? summary.activeCreators)} note={`${integer(summary.enteredCreators)} apareceram pela primeira vez no relatorio`} />
           <Metric label="Com formulario" value={percent(summary.formMatchRate)} note={`${integer(summary.matchedForms)} @ encontrados na Base de Creators`} tone="blue" />
-          <Metric label="GMV observado" value={money(summary.gmv)} note="Somado por fechamento mensal, sem duplicidade" tone="cyan" />
+          <Metric label="GMV observado" value={money(summary.gmv)} note="Somado do ledger diario por @, sem duplicidade" tone="cyan" />
           <Metric label="Receita Amplify" value={money(summary.estimatedAmplifyRevenue)} note="10% da comissao estimada do creator" tone="green" />
           {showPaid && <Metric label="CAC pago · media alocada" value={paid.acquiredCac == null ? "—" : money(paid.acquiredCac)} note={`${integer(paid.cohortCreators)} creators · Meta explicito + desconhecida assumida`} tone="amber" />}
-          {showPaid && <Metric label="LTV / CAC pago · agregado" value={ratio(paid.ltvCac)} note={`LTV observado medio ${paid.avgObservedLtv == null ? "—" : money(paid.avgObservedLtv)}`} tone="rose" />}
+          {showPaid && <Metric label="GMV Meta + tracking perdido" value={compactMoney(paid.gmv)} note={`${integer(paid.attributedCreators)} @ conferidos no ledger diario`} tone="rose" />}
         </section>
 
         {showPaid && <section className="paid-callout">
-          <div><span>Leitura de CAC</span><strong>{paid.spend == null ? "Meta sem resposta" : `${money(paid.spend)} investidos`}</strong><p>{paid.allocation}</p></div>
-          <div><span>CPL Meta observado</span><strong>{paid.leadCpl == null ? "—" : money(paid.leadCpl)}</strong><small>{paid.leads == null ? "Sem resultado retornado" : `${integer(paid.leads)} resultados da plataforma · nao leads CRM`}</small></div>
-          <div><span>Receita vitalicia da coorte paga</span><strong>{money(paid.lifetimeRevenue)}</strong><small>Ate {date(data.coverage.to)}</small></div>
+          <div><span>Investimento Meta</span><strong>{paid.spend == null ? "Meta sem resposta" : money(paid.spend)}</strong><p>{paid.allocation}</p><small>CPL plataforma {paid.leadCpl == null ? "—" : money(paid.leadCpl)} · {integer(paid.leads)} resultados</small></div>
+          <div><span>GMV real dos @ Meta</span><strong>{money(paid.gmv)}</strong><small>{integer(paid.explicitMetaCreators)} Meta explicitos + {integer(paid.assumedTrackingLossCreators)} sem tracking · {ratio(paid.gmvPerRealInvested)} por R$ 1 investido</small></div>
+          <div><span>Receita Amplify estimada</span><strong>{money(paid.estimatedAmplifyRevenue)}</strong><small>10% da comissao estimada · {ratio(paid.amplifyRevenuePerRealInvested)} por R$ 1 investido · resultado conhecido {money(paid.resultAfterKnownCosts)}</small></div>
         </section>}
 
         <section className="chart-grid">
@@ -371,7 +372,7 @@ export default function CreatorEconomicsView() {
         </section>
 
         <section className="econ-panel source-panel">
-          <header><div><span>Canal de origem</span><h2>Quem trouxe LTV, nao apenas lead</h2></div><small>Super Afiliado separado do Indique e Ganhe pela UTM cadastrada</small></header>
+          <header><div><span>Canal de origem</span><h2>Quem trouxe GMV, nao apenas lead</h2></div><small>Origem nao identificada entra em Meta por perda de tracking</small></header>
           <div className="source-table-wrap"><table className="source-table"><thead><tr><th>Origem</th><th>Creators observados</th><th>First-touch no periodo</th><th>Com formulario</th><th>GMV</th><th>Receita Amplify</th><th>LTV medio observado</th></tr></thead><tbody>{data.sourceBreakdown.map((row) => <tr key={row.key}><td><button onClick={() => { setSource(row.key); setPage(1) }}>{row.label}</button></td><td>{integer(row.creators)}</td><td>{integer(row.acquired)}</td><td>{percent(row.formMatchRate)}</td><td>{money(row.gmv)}</td><td><strong>{money(row.estimatedAmplifyRevenue)}</strong></td><td>{money(row.avgObservedLtv)}</td></tr>)}</tbody></table></div>
         </section>
 
@@ -388,7 +389,7 @@ export default function CreatorEconomicsView() {
         </section>
 
         <footer className="econ-method">
-          <div><span>Agenciados por dia</span><p>{data.caveats[9]}</p></div><div><span>Saidas e GMV 30d</span><p>{data.caveats[10]} {data.caveats[11]}</p></div><div><span>Receita, nao lucro</span><p>{data.caveats[1]}</p></div><div><span>Identidade</span><p>{data.methodology.identity} {data.methodology.form}</p></div><div><span>CAC</span><p>{data.caveats[2]}</p></div><div><span>Indique / Super</span><p>{data.caveats[7]}</p></div><div><span>Contagem de creators</span><p>{data.caveats[8]}</p></div><div><span>Periodo e retorno</span><p>{data.caveats[5]} {data.caveats[6]}</p></div><div><span>Atualizacao</span><p>Snapshot gerado em {new Date(data.generatedAt).toLocaleString("pt-BR")}. Janela comum fechada de {date(data.period?.from)} a {date(data.period?.to)}.</p></div>
+          <div><span>Agenciados por dia</span><p>{data.caveats[9]}</p></div><div><span>Saidas e GMV 30d</span><p>{data.caveats[10]} {data.caveats[11]}</p></div><div><span>Receita, nao lucro</span><p>{data.caveats[1]}</p></div><div><span>Identidade</span><p>{data.methodology.identity} {data.methodology.form}</p></div><div><span>CAC</span><p>{data.caveats[2]}</p></div><div><span>Indique / Super</span><p>{data.caveats[7]}</p></div><div><span>GMV por @</span><p>{data.caveats[8]}</p></div><div><span>Periodo e retorno</span><p>{data.caveats[5]} {data.caveats[6]}</p></div><div><span>Atualizacao</span><p>Snapshot gerado em {new Date(data.generatedAt).toLocaleString("pt-BR")}. Janela comum fechada de {date(data.period?.from)} a {date(data.period?.to)}.</p></div>
         </footer>
       </>}
     </div>
@@ -404,6 +405,7 @@ export default function CreatorEconomicsView() {
       @media(max-width:820px){.movement-section>header{display:grid}.movement-head-side{justify-items:start}.movement-head-side small{text-align:left!important}.movement-kpis{grid-template-columns:1fr 1fr}.movement-kpis>div{border-right:1px solid rgba(255,255,255,.06)!important;border-bottom:1px solid rgba(255,255,255,.06)!important}.movement-kpis>div:nth-child(2n){border-right:0!important}.movement-kpis>div:nth-last-child(-n+2){border-bottom:0!important}.movement-section>footer{grid-template-columns:1fr}.movement-section>footer em{grid-column:auto}.portfolio-chart{height:340px}.affiliation-head,.affiliation-gmv-head,.affiliation-movement-head{display:grid}.daily-gmv-latest{text-align:left;min-width:0}.daily-movement-latest{min-width:0;width:100%}.affiliation-layout{grid-template-columns:1fr}.affiliation-latest{border-right:0;border-bottom:1px solid rgba(255,255,255,.07)}.affiliation-stats{border-bottom:1px solid rgba(255,255,255,.07)}.affiliation-chart{grid-column:auto}.affiliation-daily>footer,.affiliation-gmv-copy>footer,.affiliation-movement-copy>footer{display:grid;grid-template-columns:1fr}.affiliation-movement-copy>footer em{grid-column:auto}.econ-hero{grid-template-columns:1fr;padding-bottom:30px}.hero-formula{max-width:420px}.chart-grid{grid-template-columns:1fr}.paid-callout{grid-template-columns:1fr}.paid-callout>div{border-right:0;border-bottom:1px solid rgba(255,255,255,.06)}.econ-controls,.creator-head{align-items:flex-start!important;display:grid!important}.trust-row{justify-content:flex-start}.creator-tools{width:100%}.search{flex:1}.search input{width:100%}.detail-evidence{grid-template-columns:1fr}.econ-method{grid-template-columns:1fr}.econ-brand small{display:none}}
       .creator-empty{min-height:150px;display:grid;place-items:center;align-content:center;gap:12px;color:#969DAF}.creator-empty button{border:1px solid rgba(155,140,255,.4);background:rgba(155,140,255,.12);color:#F4F6FF;border-radius:8px;padding:8px 12px;cursor:pointer}body:has(.economics-page) a[aria-label="Abrir formulário de report de bugs"]{top:11px!important;bottom:auto!important;right:max(150px,calc((100vw - 1480px)/2 + 150px))!important;width:42px;height:42px;padding:0!important;justify-content:center;font-size:0!important;opacity:.86}body:has(.economics-page) a[aria-label="Abrir formulário de report de bugs"] span{font-size:14px!important}
       @media(max-width:560px){.movement-kpis>div{padding:15px 11px}.movement-kpis strong{font-size:19px}.movement-chart{height:315px;padding-left:2px;padding-right:2px}.movement-section>footer{padding:12px 16px}.month-health{grid-template-columns:1fr 1fr}.month-health>div:nth-child(2){border-right:0}.month-health>div:nth-child(-n+2){border-bottom:1px solid rgba(255,255,255,.06)}.month-health strong{font-size:16px}.monthly-ranking>header{align-items:flex-start!important}.affiliation-head,.affiliation-gmv-head,.affiliation-movement-head{padding:20px 17px}.ledger-status{white-space:normal;width:max-content;max-width:100%}.affiliation-latest{padding:24px 19px}.affiliation-latest>strong{font-size:58px}.affiliation-stats>div{padding:18px 12px}.affiliation-chart{height:285px;padding-left:0}.affiliation-gmv-chart,.affiliation-movement-chart{height:340px;padding:8px 0 18px}.affiliation-daily>footer,.affiliation-gmv-copy>footer,.affiliation-movement-copy>footer{padding:11px 17px}.daily-movement-latest{grid-template-columns:1fr 1fr}.daily-movement-latest strong{font-size:17px}.econ-wrap{padding:28px 12px 50px}.econ-topbar{padding:0 14px}.econ-back{font-size:10px}.econ-hero h1{font-size:52px}.metric-grid{grid-template-columns:1fr 1fr}.econ-metric:nth-child(3){border-right:1px solid rgba(255,255,255,.07)}.econ-metric:nth-child(2n){border-right:0}.econ-metric:nth-child(-n+4){border-bottom:1px solid rgba(255,255,255,.07)}.month-control{width:100%}.month-control label{flex:1}.month-control input{width:100%}.creator-tools{display:grid}.chart-box{height:290px}.econ-panel>header{padding:19px 16px}.econ-panel h2{font-size:20px}body:has(.economics-page) a[aria-label="Abrir formulário de report de bugs"]{display:none!important}}
+      .origin-profit-table small{display:block;color:#8E97AA;font-size:10px;line-height:1.35;margin-top:2px}
       @media(max-width:1180px){.profit-origin-layout{grid-template-columns:1fr}.profit-origin-chart{border-right:0;border-bottom:1px solid rgba(255,255,255,.065)}.origin-profit-table{grid-template-columns:1fr 1fr;max-height:none}.origin-profit-table>div:nth-child(odd){border-right:1px solid rgba(255,255,255,.055)}}
       @media(max-width:820px){.profitability-head{display:grid}.profit-coverage{min-width:0;width:max-content}.profit-summary{grid-template-columns:1fr 1fr}.profit-summary>div{border-bottom:1px solid rgba(255,255,255,.065)}.profit-summary>div:nth-child(2n){border-right:0}.profit-summary>div:nth-last-child(-n+2){border-bottom:0}.profit-chart-grid{grid-template-columns:1fr}.profit-daily-chart,.profit-origin-card{grid-column:auto}.profit-card>header{display:grid}.profit-card>header small{text-align:left}.profitability-section>footer{grid-template-columns:1fr}.profitability-section>footer b,.profitability-section>footer em{grid-column:auto}.cost-registry>div{grid-template-columns:1fr 1fr}.cost-registry article:nth-child(2){border-right:0}.cost-registry article:nth-child(-n+2){border-bottom:1px solid rgba(255,255,255,.06)}}
       @media(max-width:560px){.profitability-head{padding:23px 17px 18px}.profitability-head h2{font-size:25px}.profit-summary>div{padding:16px 12px}.profit-summary strong{font-size:19px}.profit-summary span{min-height:30px}.profit-warning{margin:12px 12px 0}.profit-chart-grid{padding:12px;gap:12px}.profit-card>header{padding:15px 14px 12px}.profit-card h3{font-size:17px}.profit-chart,.profit-chart-wide{height:330px;padding-left:0;padding-right:0}.profit-origin-chart{height:390px;padding-left:0;padding-right:0}.profit-origin-layout{min-height:0}.origin-profit-table{grid-template-columns:1fr}.origin-profit-table>div:nth-child(odd){border-right:0}.cost-registry{margin:0 12px 14px}.cost-registry>header{display:grid}.cost-registry>div{grid-template-columns:1fr}.cost-registry article{border-right:0;border-bottom:1px solid rgba(255,255,255,.06)}.cost-registry article:last-child{border-bottom:0}.profitability-section>footer{padding:12px 16px}}
@@ -415,7 +417,7 @@ function FragmentRow({ creator, expanded, onToggle }) {
   return <>
     <tr className="creator-row">
       <td><div className="creator-name"><i>@</i><strong>{creator.handle}</strong>{creator.returnedInRange && <span className="return-dot" title="Voltou no periodo" />}</div></td>
-      <td><span className="origin-tag">{creator.acquisition.label}</span></td>
+      <td><span className="origin-tag">{originLabel(creator.acquisition)}</span></td>
       <td><span className={`form-tag ${creator.form.matched ? "yes" : ""}`}>{creator.form.matched ? "Sim" : "Nao"}</span></td>
       <td>{integer(creator.period.activeDays)}</td>
       <td>{money(creator.period.gmv)}</td>

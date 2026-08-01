@@ -10,6 +10,7 @@ const PORTFOLIO_ANALYTICS_PATH = '/root/.openclaw/workspaces/retencao-gabriel/wo
 const META_ENV_PATH = '/root/.openclaw/workspaces/analista-trafego/.env'
 const META_API_VERSION = 'v19.0'
 const metaCache = new Map()
+const ASSUMED_META_KEYS = new Set(['paid-meta', 'unknown'])
 
 function round(value) { return Math.round((Number(value) || 0) * 100) / 100 }
 function percent(total, value) { return total ? round((value / total) * 100) : 0 }
@@ -37,6 +38,7 @@ function monthsBetween(from, to) {
   return result
 }
 function inDateRange(date, from, to) { return Boolean(date && date >= `${from}-01` && date <= lastDay(to)) }
+function normalizeHandle(value) { return String(value || '').trim().toLowerCase().replace(/^@/, '') }
 function nextDay(value) {
   const cursor = new Date(`${value}T00:00:00Z`)
   cursor.setUTCDate(cursor.getUTCDate() + 1)
@@ -88,6 +90,41 @@ async function readDailyAffiliation(from, to) {
     complete: missingDays.length === 0 && series.every((row) => row.complete),
     series,
   }
+}
+async function readCanonicalCreatorMonths(monthKeys) {
+  const byCreator = new Map()
+  const payloads = await Promise.all(monthKeys.map(async (month) => {
+    const file = `${DAILY_LEDGER_MONTHLY}/${month}/creator_month_sum_from_days__${month}.json`
+    const payload = JSON.parse(await readFile(file, 'utf8'))
+    if (payload.schema_version !== 2 || payload.month !== month || payload.aggregation !== 'sum_of_one_day_creator_reports' || !Array.isArray(payload.items)) {
+      throw new Error(`ledger mensal canonico invalido em ${month}`)
+    }
+    if (payload.coverage?.missing_through_last_day?.length || payload.coverage?.incomplete_days?.length) {
+      throw new Error(`ledger mensal canonico incompleto em ${month}`)
+    }
+    return payload
+  }))
+  for (const payload of payloads) {
+    for (const row of payload.items) {
+      const authorId = String(row.author_id || '')
+      if (!/^\d+$/.test(authorId) || !Number.isFinite(row.sum_cl_pay_amt) || !Number.isFinite(row.pre_estimated_commission) || !Number.isInteger(row.active_day_count)) {
+        throw new Error(`creator mensal invalido em ${payload.month}: ${authorId || 'sem id'}`)
+      }
+      if (!byCreator.has(authorId)) byCreator.set(authorId, new Map())
+      if (byCreator.get(authorId).has(payload.month)) throw new Error(`creator duplicado em ${payload.month}: ${authorId}`)
+      byCreator.get(authorId).set(payload.month, {
+        month: payload.month,
+        snapshotDate: payload.coverage.last_day,
+        gmv: round(row.sum_cl_pay_amt),
+        estimatedCreatorCommission: round(row.pre_estimated_commission),
+        estimatedAmplifyRevenue: round(row.pre_estimated_commission * 0.10),
+        activeDays: row.active_day_count,
+        matchMethod: 'author_id',
+        matchedHandles: String(row.aliases || row.author_alias || '').split('|').map(normalizeHandle).filter(Boolean),
+      })
+    }
+  }
+  return byCreator
 }
 async function readPortfolioAnalytics(from, to) {
   const payload = JSON.parse(await readFile(PORTFOLIO_ANALYTICS_PATH, 'utf8'))
@@ -235,12 +272,16 @@ function sumMetrics(rows, monthlyOnly = true) {
 function sourceAggregate(rows) {
   const bySource = new Map()
   for (const row of rows) {
-    const key = row.acquisition.key
-    if (!bySource.has(key)) bySource.set(key, { key, label: row.acquisition.label, creators: 0, entered: 0, acquired: 0, matchedForms: 0, returned: 0, activeDays: 0, gmv: 0, estimatedCreatorCommission: 0, lifetimeRevenue: 0 })
+    const assumedMeta = ASSUMED_META_KEYS.has(row.acquisition.key)
+    const key = assumedMeta ? 'paid-meta' : row.acquisition.key
+    const label = assumedMeta ? 'Meta Ads + tracking perdido' : row.acquisition.label
+    if (!bySource.has(key)) bySource.set(key, { key, label, creators: 0, explicitCreators: 0, assumedTrackingLossCreators: 0, entered: 0, acquired: 0, matchedForms: 0, returned: 0, activeDays: 0, gmv: 0, estimatedCreatorCommission: 0, lifetimeRevenue: 0 })
     const item = bySource.get(key)
     item.creators += 1
+    item.explicitCreators += row.acquisition.key === 'paid-meta' ? 1 : 0
+    item.assumedTrackingLossCreators += row.acquisition.key === 'unknown' ? 1 : 0
     item.entered += row.enteredInRange ? 1 : 0
-    item.acquired += row.acquiredInRange ? 1 : 0
+    item.acquired += (row.acquisition.key === 'unknown' ? row.enteredInRange : row.acquiredInRange) ? 1 : 0
     item.matchedForms += row.form.matched ? 1 : 0
     item.returned += row.returnedInRange ? 1 : 0
     item.activeDays += row.period.activeDays
@@ -296,34 +337,44 @@ export async function GET(request) {
     if (from > to) [from, to] = [to, from]
     from = from < coverageFrom ? coverageFrom : from > coverageTo ? coverageTo : from
     to = to < coverageFrom ? coverageFrom : to > coverageTo ? coverageTo : to
-    const sourceFilter = url.searchParams.get('source') || 'all'
+    const sourceFilterRaw = url.searchParams.get('source') || 'all'
+    const sourceFilter = sourceFilterRaw === 'unknown' ? 'paid-meta' : sourceFilterRaw
     const query = String(url.searchParams.get('q') || '').trim().toLowerCase().replace(/^@/, '')
     const page = Math.max(1, Number(url.searchParams.get('page')) || 1)
     const limit = Math.min(250, Math.max(25, Number(url.searchParams.get('limit')) || 100))
     const sort = url.searchParams.get('sort') || 'revenue'
     const monthKeys = monthsBetween(from, to)
-    const monthSet = new Set(monthKeys)
-    const affiliationDaily = await readDailyAffiliation(from, to)
-    const portfolioAnalytics = await readPortfolioAnalytics(from, to)
+    const [affiliationDaily, portfolioAnalytics, canonicalCreatorMonths] = await Promise.all([
+      readDailyAffiliation(from, to),
+      readPortfolioAnalytics(from, to),
+      readCanonicalCreatorMonths(monthKeys),
+    ])
 
     const activeRows = snapshot.creators.map((creator) => {
-      const monthly = creator.monthly.filter((month) => monthSet.has(month.month))
+      const creatorMonths = canonicalCreatorMonths.get(String(creator.id))
+      const monthly = monthKeys.map((month) => creatorMonths?.get(month)).filter(Boolean)
       if (!monthly.length) return null
+      const knownHandles = new Set(monthly.flatMap((month) => month.matchedHandles))
+      const crmHandles = [creator.handle, ...(creator.aliases || [])].map(normalizeHandle).filter(Boolean)
+      if (!crmHandles.some((handle) => knownHandles.has(handle))) {
+        throw new Error(`@ do CRM nao confere com ledger diario: ${creator.handle || creator.id}`)
+      }
       const periodCommission = round(monthly.reduce((sum, month) => sum + month.estimatedCreatorCommission, 0))
       const period = {
         activeDays: monthly.reduce((sum, month) => sum + month.activeDays, 0),
         gmv: round(monthly.reduce((sum, month) => sum + month.gmv, 0)),
         estimatedCreatorCommission: periodCommission,
         estimatedAmplifyRevenue: round(periodCommission * 0.10),
+        source: 'ledger_diario_canonico',
+        matchMethod: 'author_id_and_exact_handle',
       }
-      const acquisitionMonth = creator.acquisition.entryAt?.slice(0, 7) || ''
-      const postAcquisitionMonths = acquisitionMonth ? creator.monthly.filter((month) => month.month >= acquisitionMonth) : creator.monthly
-      const observedLtv = round(postAcquisitionMonths.reduce((sum, month) => sum + month.estimatedAmplifyRevenue, 0))
+      const observedLtv = period.estimatedAmplifyRevenue
       return {
         ...creator,
         monthly,
         period,
         observedLtv,
+        ledgerMatch: { authorId: String(creator.id), handle: creator.handle, exact: true },
         enteredInRange: inDateRange(creator.firstLinked, from, to),
         acquiredInRange: inDateRange(creator.acquisition.entryAt, from, to),
         returnedInRange: creator.returnDates.some((date) => inDateRange(date, from, to)),
@@ -331,7 +382,7 @@ export async function GET(request) {
     }).filter(Boolean)
 
     const sourceOptions = sourceAggregate(activeRows).map(({ key, label, creators }) => ({ key, label, creators }))
-    const filtered = sourceFilter === 'all' ? activeRows : activeRows.filter((row) => row.acquisition.key === sourceFilter)
+    const filtered = sourceFilter === 'all' ? activeRows : activeRows.filter((row) => sourceFilter === 'paid-meta' ? ASSUMED_META_KEYS.has(row.acquisition.key) : row.acquisition.key === sourceFilter)
     const monthly = monthKeys.map((month) => {
       const rows = filtered.filter((row) => row.monthly.some((item) => item.month === month))
       const monthValues = rows.map((row) => row.monthly.find((item) => item.month === month))
@@ -348,14 +399,19 @@ export async function GET(request) {
       }
     })
 
-    const commonClosedThrough = snapshot.coverage.to < lastDay(to) ? snapshot.coverage.to : lastDay(to)
-    const commonFrom = `${from}-01`
+    const commonFrom = affiliationDaily.range.from
+    const commonClosedThrough = affiliationDaily.range.to
     const meta = await readMetaRange(commonFrom, commonClosedThrough)
-    const paidCohort = activeRows.filter((row) => row.acquisition.key === 'paid-meta' && row.acquiredInRange)
+    const paidRows = activeRows.filter((row) => ASSUMED_META_KEYS.has(row.acquisition.key))
+    const paidCohort = paidRows.filter((row) => row.acquisition.key === 'unknown' ? row.enteredInRange : row.acquiredInRange)
     const paidCac = meta.spend !== null && paidCohort.length ? round(meta.spend / paidCohort.length) : null
-    const paidLifetimeRevenue = round(paidCohort.reduce((sum, row) => sum + row.observedLtv, 0))
-    const paidAvgObservedLtv = paidCohort.length ? round(paidLifetimeRevenue / paidCohort.length) : null
+    const paidGmv = round(paidRows.reduce((sum, row) => sum + row.period.gmv, 0))
+    const paidEstimatedCreatorCommission = round(paidRows.reduce((sum, row) => sum + row.period.estimatedCreatorCommission, 0))
+    const paidLifetimeRevenue = round(paidEstimatedCreatorCommission * 0.10)
+    const paidAvgObservedLtv = paidRows.length ? round(paidLifetimeRevenue / paidRows.length) : null
     const paidLtvCac = paidCac ? round(paidAvgObservedLtv / paidCac) : null
+    const paidGmvPerReal = meta.spend ? round(paidGmv / meta.spend) : null
+    const paidRevenuePerReal = meta.spend ? round(paidLifetimeRevenue / meta.spend) : null
 
     const totals = sumMetrics(filtered)
     const monthlyRevenue = round(monthly.reduce((sum, item) => sum + item.estimatedAmplifyRevenue, 0))
@@ -409,6 +465,11 @@ export async function GET(request) {
       return {
         key: item.key,
         label: item.label,
+        creators: item.creators,
+        explicitCreators: item.explicitCreators,
+        assumedTrackingLossCreators: item.assumedTrackingLossCreators,
+        gmv: item.gmv,
+        estimatedCreatorCommission: item.estimatedCreatorCommission,
         amplifyRevenue: item.estimatedAmplifyRevenue,
         knownCost,
         resultAfterKnownCosts,
@@ -443,10 +504,11 @@ export async function GET(request) {
         { key: 'other', label: 'Outros custos', status: 'pending', amount: null, source: null, grain: null },
       ],
       definitions: {
+        gmv: 'GMV por origem = soma de sum_cl_pay_amt no ledger diario, unida ao CRM pelo author_id e conferida pelo @ exato.',
         revenue: 'Receita Amplify estimada = 10% da comissao estimada do creator no Partner Center.',
         knownCost: 'Soma apenas categorias com valor e data comprovados. Hoje: trafego pago Meta.',
         result: 'Receita Amplify estimada menos custos conhecidos. Nao e lucro liquido enquanto houver custos pendentes.',
-        origin: 'Custos por origem so sao exibidos quando existe atribuicao comprovada. Valores ausentes permanecem pendentes, nunca zero.',
+        origin: 'Meta Ads inclui origem explicita e Origem nao identificada assumida como Meta por perda de tracking. Custos ausentes permanecem pendentes, nunca zero.',
       },
     }
     const entered = filtered.filter((row) => row.enteredInRange).length
@@ -456,8 +518,8 @@ export async function GET(request) {
     const rowsForTable = filtered.filter((row) => !query || row.handle.includes(query) || row.aliases.some((alias) => alias.includes(query)))
       .map((row) => ({
         ...row,
-        allocatedCac: row.acquisition.key === 'paid-meta' && row.acquiredInRange ? paidCac : null,
-        ltvCac: row.acquisition.key === 'paid-meta' && row.acquiredInRange && paidCac ? round(row.observedLtv / paidCac) : null,
+        allocatedCac: ASSUMED_META_KEYS.has(row.acquisition.key) && (row.acquisition.key === 'unknown' ? row.enteredInRange : row.acquiredInRange) ? paidCac : null,
+        ltvCac: ASSUMED_META_KEYS.has(row.acquisition.key) && (row.acquisition.key === 'unknown' ? row.enteredInRange : row.acquiredInRange) && paidCac ? round(row.observedLtv / paidCac) : null,
       }))
     const sorters = {
       revenue: (a, b) => b.period.estimatedAmplifyRevenue - a.period.estimatedAmplifyRevenue,
@@ -497,6 +559,9 @@ export async function GET(request) {
       },
       paidEconomics: {
         cohortCreators: paidCohort.length,
+        attributedCreators: paidRows.length,
+        explicitMetaCreators: paidRows.filter((row) => row.acquisition.key === 'paid-meta').length,
+        assumedTrackingLossCreators: paidRows.filter((row) => row.acquisition.key === 'unknown').length,
         spend: meta.spend,
         leads: meta.results,
         leadCpl: meta.spend !== null && meta.results ? round(meta.spend / meta.results) : null,
@@ -504,7 +569,13 @@ export async function GET(request) {
         avgObservedLtv: paidAvgObservedLtv,
         ltvCac: paidLtvCac,
         lifetimeRevenue: paidLifetimeRevenue,
-        allocation: 'Media agregada alocada: gasto Meta / creators com Ads Meta explicito ou Origem Desconhecida assumida como Meta por perda de tracking, first-touch na janela comum e @ vinculado ao Partner Center. Nao e CAC individual atribuido.',
+        gmv: paidGmv,
+        estimatedCreatorCommission: paidEstimatedCreatorCommission,
+        estimatedAmplifyRevenue: paidLifetimeRevenue,
+        gmvPerRealInvested: paidGmvPerReal,
+        amplifyRevenuePerRealInvested: paidRevenuePerReal,
+        resultAfterKnownCosts: meta.spend == null ? null : round(paidLifetimeRevenue - meta.spend),
+        allocation: 'Meta inclui Ads Meta explicito + Origem nao identificada assumida como Meta por perda de tracking. Cada @ do CRM e unido ao ledger diario por author_id e conferido por correspondencia exata do @. O gasto continua agregado; nao e CAC individual atribuido.',
         contracts: {
           metaPlatformCpl: { value: meta.spend !== null && meta.results ? round(meta.spend / meta.results) : null, status: meta.spend === null ? 'unavailable' : 'observed', basis: 'resultados da plataforma Meta; nao sao leads CRM validados' },
           paidCohortCac: { value: paidCac, status: paidCac == null ? 'unavailable' : 'estimated', attribution: 'allocated_average', scope: 'agregado da coorte Ads Meta explicita + Origem Desconhecida assumida como Meta, vinculada a retencao' },
@@ -515,8 +586,9 @@ export async function GET(request) {
       },
       quality: {
         unknownOriginCreators: snapshot.creators.filter((row) => row.acquisition.key === 'unknown').length,
-        explicitPaidCreators: snapshot.creators.filter((row) => row.acquisition.key === 'paid-meta' && row.acquisition.attributionBasis !== 'assumed_tracking_loss').length,
-        assumedPaidCreators: snapshot.creators.filter((row) => row.acquisition.key === 'paid-meta' && row.acquisition.attributionBasis === 'assumed_tracking_loss').length,
+        explicitPaidCreators: snapshot.creators.filter((row) => row.acquisition.key === 'paid-meta').length,
+        assumedPaidCreators: snapshot.creators.filter((row) => row.acquisition.key === 'unknown').length,
+        exactLedgerMatches: activeRows.filter((row) => row.ledgerMatch.exact).length,
         missingAdIdentity: true,
         partnershipStatusAvailable: false,
         commonClosedThrough,
@@ -533,10 +605,10 @@ export async function GET(request) {
         'CAC exibido e media agregada alocada da coorte Ads Meta explicita + Origem Desconhecida assumida como Meta por perda de tracking. A suposicao e regra operacional, nao atribuicao individual comprovada; o CRM nao persiste IDs Meta.',
         'AmplifyOS considera somente origens nativas Ads Meta, WhatsApp direto e Programa Indique; imports legados sao excluidos da Nova IA.',
         'Formulario preenchido exige correspondencia exata do @ ou de um alias historico; nomes parecidos nao sao unidos.',
-        'Periodo observado inclui todo creator presente no relatorio acumulado da janela; primeira aparicao mede o primeiro dia observado no Partner Center dentro dela.',
+        'Periodo observado inclui todo creator presente em pelo menos um relatorio Criador diario fechado da janela; primeira aparicao mede o primeiro dia observado no Partner Center dentro dela.',
         'Retornante = author_id com nova sequencia de dias apos pelo menos um dia ausente; dias sao datas distintas, nao o intervalo entre primeira e ultima aparicao.',
         'Super Afiliado usa membership exata no registro versionado de UTM; o restante do intake comprovado de referral fica em Indique e Ganhe.',
-        'Creators observados sao author_ids presentes no relatorio creator_gmv acumulado da janela. O export nao possui status de parceria e nao mede Vinculados agora no Partner Center.',
+        'GMV por creator e origem soma sum_cl_pay_amt dos dias fechados e cruza o author_id com o CRM, exigindo tambem correspondencia exata do @ ou alias. O GMV declarado no CRM nao e usado.',
         'Agenciados por dia vem do relatorio Criador consultado com inicio e fim iguais para cada data. Creators com GMV no dia e uma serie separada e nao substitui a contagem de agenciados.',
         'Saida observada = author_id presente no dia anterior e ausente no dia atual. Nao e evento oficial de desvinculacao; uma volta posterior aparece como retorno.',
         'GMV previo 30d associado as saidas soma o GMV dos 30 dias fechados anteriores a cada evento. Mede potencial que saiu da base observada, nao perda contabil nem projecao contrafactual.',
