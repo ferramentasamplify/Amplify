@@ -11,6 +11,18 @@ const META_ENV_PATH = '/root/.openclaw/workspaces/analista-trafego/.env'
 const META_API_VERSION = 'v19.0'
 const metaCache = new Map()
 const ASSUMED_META_KEYS = new Set(['paid-meta', 'unknown'])
+const CREATOR_TIERS = [
+  { key: 'start', label: 'Start', minExclusive: 0, maxInclusive: 5000, color: '#7D8A9D' },
+  { key: 'silver', label: 'Silver', minExclusive: 5000, maxInclusive: 30000, color: '#AEB8C8' },
+  { key: 'gold', label: 'Gold', minExclusive: 30000, maxInclusive: 100000, color: '#F6B84B' },
+  { key: 'diamond', label: 'Diamond', minExclusive: 100000, maxInclusive: 500000, color: '#62D8FF' },
+  { key: 'safira', label: 'Safira', minExclusive: 500000, maxInclusive: 1000000, color: '#6E78FF' },
+]
+const TIER_AUXILIARY = {
+  'no-gmv': { key: 'no-gmv', label: 'Sem GMV' },
+  'outside-base': { key: 'outside-base', label: 'Fora da base' },
+  'above-safira': { key: 'above-safira', label: 'Acima de R$ 1 mi' },
+}
 
 function round(value) { return Math.round((Number(value) || 0) * 100) / 100 }
 function percent(total, value) { return total ? round((value / total) * 100) : 0 }
@@ -125,6 +137,110 @@ async function readCanonicalCreatorMonths(monthKeys) {
     }
   }
   return byCreator
+}
+function classifyCreatorTier(gmv) {
+  if (!Number.isFinite(gmv)) throw new Error('GMV mensal invalido para classificacao')
+  if (gmv <= 0) return 'no-gmv'
+  return CREATOR_TIERS.find((tier) => gmv > tier.minExclusive && gmv <= tier.maxInclusive)?.key || 'above-safira'
+}
+function buildCreatorTierAnalytics(byCreator, monthKeys) {
+  const tierKeys = CREATOR_TIERS.map((tier) => tier.key)
+  const tierIndex = new Map(tierKeys.map((key, index) => [key, index]))
+  const labels = new Map([...CREATOR_TIERS, ...Object.values(TIER_AUXILIARY)].map((item) => [item.key, item.label]))
+  const byMonth = new Map(monthKeys.map((month) => [month, new Map()]))
+  for (const [authorId, months] of byCreator) {
+    for (const month of monthKeys) {
+      const item = months.get(month)
+      if (item) byMonth.get(month).set(authorId, { tier: classifyCreatorTier(item.gmv), gmv: item.gmv })
+    }
+  }
+  const monthly = monthKeys.map((month) => {
+    const counts = Object.fromEntries([...tierKeys, 'no-gmv', 'above-safira'].map((key) => [key, 0]))
+    let totalGmv = 0
+    for (const item of byMonth.get(month).values()) {
+      counts[item.tier] += 1
+      totalGmv += item.gmv
+    }
+    const categorizedCreators = tierKeys.reduce((total, key) => total + counts[key], 0)
+    return {
+      month,
+      observedCreators: byMonth.get(month).size,
+      categorizedCreators,
+      noGmvCreators: counts['no-gmv'],
+      aboveSafiraCreators: counts['above-safira'],
+      totalGmv: round(totalGmv),
+      ...Object.fromEntries(tierKeys.map((key) => [key, counts[key]])),
+    }
+  })
+  const transitions = monthKeys.slice(1).map((month, index) => {
+    const fromMonth = monthKeys[index]
+    const previous = byMonth.get(fromMonth)
+    const current = byMonth.get(month)
+    const ids = new Set([...previous.keys(), ...current.keys()])
+    const matrixCounts = Object.fromEntries(tierKeys.map((fromKey) => [fromKey, Object.fromEntries(tierKeys.map((toKey) => [toKey, 0]))]))
+    const flowCounts = new Map()
+    let promoted = 0
+    let demoted = 0
+    let retained = 0
+    let enteredTier = 0
+    let leftTier = 0
+    let enteredBase = 0
+    let exitedBase = 0
+    let aboveSafira = 0
+    for (const authorId of ids) {
+      const fromKey = previous.get(authorId)?.tier || 'outside-base'
+      const toKey = current.get(authorId)?.tier || 'outside-base'
+      const flowKey = `${fromKey}::${toKey}`
+      flowCounts.set(flowKey, (flowCounts.get(flowKey) || 0) + 1)
+      const fromInternal = tierIndex.has(fromKey)
+      const toInternal = tierIndex.has(toKey)
+      if (fromInternal && toInternal) {
+        matrixCounts[fromKey][toKey] += 1
+        if (tierIndex.get(toKey) > tierIndex.get(fromKey)) promoted += 1
+        else if (tierIndex.get(toKey) < tierIndex.get(fromKey)) demoted += 1
+        else retained += 1
+      } else if (!fromInternal && toInternal) enteredTier += 1
+      else if (fromInternal && !toInternal) leftTier += 1
+      if (fromKey === 'outside-base' && toKey !== 'outside-base') enteredBase += 1
+      if (fromKey !== 'outside-base' && toKey === 'outside-base') exitedBase += 1
+      if (fromKey === 'above-safira' || toKey === 'above-safira') aboveSafira += 1
+    }
+    const matrix = tierKeys.map((fromKey) => ({
+      from: fromKey,
+      label: labels.get(fromKey),
+      total: tierKeys.reduce((total, toKey) => total + matrixCounts[fromKey][toKey], 0),
+      cells: tierKeys.map((toKey) => ({ to: toKey, label: labels.get(toKey), count: matrixCounts[fromKey][toKey] })),
+    }))
+    const flows = [...flowCounts.entries()].map(([key, count]) => {
+      const [from, to] = key.split('::')
+      return { from, fromLabel: labels.get(from), to, toLabel: labels.get(to), count }
+    }).sort((a, b) => b.count - a.count || a.from.localeCompare(b.from) || a.to.localeCompare(b.to))
+    return {
+      fromMonth,
+      toMonth: month,
+      fromObservedCreators: previous.size,
+      toObservedCreators: current.size,
+      evaluatedBetweenTiers: promoted + demoted + retained,
+      promoted,
+      demoted,
+      retained,
+      enteredTier,
+      leftTier,
+      enteredBase,
+      exitedBase,
+      aboveSafira,
+      matrix,
+      flows,
+    }
+  })
+  return {
+    source: 'ledger diario canonico Criador agregado por author_id e mes',
+    definition: 'Classificacao pelo GMV mensal observado: Start > R$ 0 ate R$ 5 mil; Silver > R$ 5 mil ate R$ 30 mil; Gold > R$ 30 mil ate R$ 100 mil; Diamond > R$ 100 mil ate R$ 500 mil; Safira > R$ 500 mil ate R$ 1 milhao.',
+    auxiliaryStates: 'Sem GMV e Fora da base sao estados auxiliares para explicar entradas e saidas; nao sao categorias internas. Valores acima de R$ 1 milhao ficam explicitamente fora da taxonomia Safira.',
+    tiers: CREATOR_TIERS,
+    monthly,
+    transitions,
+  }
 }
 async function readPortfolioAnalytics(from, to) {
   const payload = JSON.parse(await readFile(PORTFOLIO_ANALYTICS_PATH, 'utf8'))
@@ -349,6 +465,7 @@ export async function GET(request) {
       readPortfolioAnalytics(from, to),
       readCanonicalCreatorMonths(monthKeys),
     ])
+    const creatorTierAnalytics = buildCreatorTierAnalytics(canonicalCreatorMonths, monthKeys)
 
     const activeRows = snapshot.creators.map((creator) => {
       const creatorMonths = canonicalCreatorMonths.get(String(creator.id))
@@ -542,6 +659,7 @@ export async function GET(request) {
       sources: snapshot.sources,
       affiliationDaily,
       portfolioAnalytics,
+      creatorTierAnalytics,
       profitability,
       summary: {
         activeCreators: filtered.length,

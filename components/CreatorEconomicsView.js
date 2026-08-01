@@ -12,6 +12,7 @@ const ratio = (value) => value == null ? "—" : Number(value) > 0 && Number(val
 const date = (value) => value ? new Date(`${value.slice(0, 10)}T12:00:00`).toLocaleDateString("pt-BR") : "—"
 const monthLabel = (value) => value ? new Date(`${value}-15T12:00:00`).toLocaleDateString("pt-BR", { month: "short", year: "2-digit" }).replace(" de ", " ") : ""
 const originLabel = (acquisition) => acquisition?.key === "unknown" ? "Meta Ads + tracking perdido" : acquisition?.label
+const tierOrder = ["start", "silver", "gold", "diamond", "safira"]
 
 function Metric({ label, value, note, tone = "violet" }) {
   return <div className={`econ-metric ${tone}`}><span>{label}</span><strong>{value}</strong><small>{note}</small></div>
@@ -45,6 +46,11 @@ function ProfitabilityTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null
   const title = /^\d{4}-\d{2}-\d{2}$/.test(String(label)) ? date(label) : /^\d{4}-\d{2}$/.test(String(label)) ? monthLabel(label) : label
   return <div className="chart-tip"><strong>{title}</strong>{payload.filter((item) => item.value != null).map((item) => <div key={item.dataKey}><i style={{ background: item.color }} /><span>{item.name}</span><b>{money(item.value)}</b></div>)}</div>
+}
+
+function EfficiencyTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null
+  return <div className="chart-tip"><strong>{date(label)}</strong>{payload.filter((item) => item.value != null).map((item) => <div key={item.dataKey}><i style={{ background: item.color }} /><span>{item.name}</span><b>{item.dataKey.startsWith("conversion") ? percent(item.value) : money(item.value)}</b></div>)}</div>
 }
 
 function MovementTooltip({ active, payload, label }) {
@@ -82,6 +88,7 @@ export default function CreatorEconomicsView() {
   const [page, setPage] = useState(1)
   const [expanded, setExpanded] = useState("")
   const [portfolioMonth, setPortfolioMonth] = useState("2026-07")
+  const [tierTransitionMonth, setTierTransitionMonth] = useState("2026-07")
   const [movementWindow, setMovementWindow] = useState("30")
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -106,6 +113,8 @@ export default function CreatorEconomicsView() {
         if (payload.range) { setFrom(payload.range.from); setTo(payload.range.to) }
         const portfolioMonths = payload.portfolioAnalytics?.monthly || []
         if (portfolioMonths.length) setPortfolioMonth((current) => portfolioMonths.some((item) => item.month === current) ? current : portfolioMonths.at(-1).month)
+        const tierTransitions = payload.creatorTierAnalytics?.transitions || []
+        if (tierTransitions.length) setTierTransitionMonth((current) => tierTransitions.some((item) => item.toMonth === current) ? current : tierTransitions.at(-1).toMonth)
       })
       .catch((cause) => { if (!cancelled) { setData(null); setError(cause.message) } })
       .finally(() => { if (!cancelled) setLoading(false) })
@@ -114,8 +123,26 @@ export default function CreatorEconomicsView() {
 
   const chartData = useMemo(() => (data?.monthly || []).map((item) => ({ ...item, label: monthLabel(item.month) })), [data])
   const dailyData = useMemo(() => data?.affiliationDaily?.series || [], [data])
+  const trendData = useMemo(() => dailyData.map((item, index, rows) => {
+    const conversionRate = item.affiliatedCreators ? item.gmvCreators / item.affiliatedCreators * 100 : 0
+    const gmvPerAffiliated = item.affiliatedCreators ? item.dailyGmv / item.affiliatedCreators : 0
+    const window = rows.slice(Math.max(0, index - 6), index + 1)
+    const average = (key) => window.reduce((total, row) => total + Number(row[key] || 0), 0) / window.length
+    return {
+      date: item.date,
+      conversionRate,
+      gmvPerAffiliated,
+      conversionRate7d: index < 6 ? null : average("gmvCreators") / average("affiliatedCreators") * 100,
+      gmvPerAffiliated7d: index < 6 ? null : average("dailyGmv") / average("affiliatedCreators"),
+    }
+  }), [dailyData])
   const affiliation = data?.affiliationDaily || {}
   const portfolio = data?.portfolioAnalytics || {}
+  const tierAnalytics = data?.creatorTierAnalytics || {}
+  const selectedTierTransition = tierAnalytics.transitions?.find((item) => item.toMonth === tierTransitionMonth) || tierAnalytics.transitions?.at(-1) || {}
+  const tierMatrixMax = Math.max(1, ...(selectedTierTransition.matrix || []).flatMap((row) => row.cells.map((cell) => cell.count)))
+  const migrationFlows = (selectedTierTransition.flows || []).filter((flow) => flow.from !== flow.to).slice(0, 10)
+  const trendLatest = trendData.at(-1) || {}
   const movementData = portfolio.daily || []
   const movementChartData = movementWindow === "all" ? movementData : movementData.slice(-Number(movementWindow))
   const latestMovement = movementData.at(-1) || {}
@@ -221,6 +248,33 @@ export default function CreatorEconomicsView() {
             </ResponsiveContainer>
           </div>
           <footer><span>GMV diario = soma de <b>sum_cl_pay_amt</b> no relatorio Criador fechado de cada data.</span><em>Eixo financeiro em R$ separado das contagens.</em></footer>
+        </section>
+
+        <section className="efficiency-trend-copy">
+          <header className="efficiency-trend-head">
+            <div><span className="affiliation-kicker">Tendencia da monetizacao</span><h2>Conversao e GMV medio por agenciado</h2><p>Copia analitica do ledger diario. As linhas fortes mostram a media movel de 7 dias; as linhas finas preservam o valor real de cada data.</p></div>
+            <div className="efficiency-latest">
+              <div><span>Base com GMV · media 7d</span><strong>{percent(trendLatest.conversionRate7d)}</strong><small>{percent(trendLatest.conversionRate)} no ultimo dia</small></div>
+              <div><span>GMV / agenciado · media 7d</span><strong>{money(trendLatest.gmvPerAffiliated7d)}</strong><small>{money(trendLatest.gmvPerAffiliated)} no ultimo dia</small></div>
+            </div>
+          </header>
+          <div className="efficiency-trend-chart">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 1240, height: 390 }}>
+              <ComposedChart data={trendData} margin={{ top: 20, right: 8, left: -4, bottom: 2 }}>
+                <CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} />
+                <XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#5E6678" tick={{ fontSize: 10 }} minTickGap={32} />
+                <YAxis yAxisId="conversion" stroke="#3D7B82" tickFormatter={(value) => `${Math.round(Number(value))}%`} tick={{ fontSize: 10 }} width={50} domain={[0, "dataMax + 5"]} />
+                <YAxis yAxisId="productivity" orientation="right" stroke="#A5783A" tickFormatter={compactMoney} tick={{ fontSize: 10 }} width={72} />
+                <Tooltip content={<EfficiencyTooltip />} />
+                <Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} />
+                <Line yAxisId="conversion" type="monotone" dataKey="conversionRate" name="% com GMV · diario" stroke="#54D8E8" strokeOpacity={.24} strokeWidth={1.2} dot={false} />
+                <Line yAxisId="conversion" type="monotone" dataKey="conversionRate7d" name="% com GMV · media 7d" stroke="#54D8E8" strokeWidth={3} dot={false} connectNulls={false} />
+                <Line yAxisId="productivity" type="monotone" dataKey="gmvPerAffiliated" name="GMV por agenciado · diario" stroke="#F6B84B" strokeOpacity={.22} strokeWidth={1.2} dot={false} />
+                <Line yAxisId="productivity" type="monotone" dataKey="gmvPerAffiliated7d" name="GMV por agenciado · media 7d" stroke="#F6B84B" strokeWidth={3} dot={false} connectNulls={false} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+          <footer><span><b>% com GMV</b> = creators com GMV ÷ agenciados no dia.</span><span><b>GMV por agenciado</b> = GMV diario ÷ agenciados no dia.</span><em>Media movel de 7 dias reduz picos sem apagar o valor diario real.</em></footer>
         </section>
 
         <section className="affiliation-movement-copy">
@@ -345,6 +399,51 @@ export default function CreatorEconomicsView() {
           </article>
         </section>
 
+        {tierAnalytics.transitions?.length > 0 && <section className="tier-transition-section">
+          <header className="tier-transition-head">
+            <div><span className="tier-kicker">Classificacao interna por GMV mensal</span><h2>Quem subiu, caiu ou permaneceu de categoria</h2><p>Todo movimento e calculado pelo GMV real dos relatorios diarios fechados, agregado por <b>author_id</b> em cada mes.</p></div>
+            <label><span>Comparar meses</span><select value={selectedTierTransition.toMonth || tierTransitionMonth} onChange={(event) => setTierTransitionMonth(event.target.value)}>{(tierAnalytics.transitions || []).map((item) => <option key={item.toMonth} value={item.toMonth}>{monthLabel(item.fromMonth)} → {monthLabel(item.toMonth)}</option>)}</select></label>
+          </header>
+
+          <div className="tier-rules">{(tierAnalytics.tiers || []).map((tier) => <div key={tier.key} style={{ "--tier-color": tier.color }}><i /><span>{tier.label}</span><strong>{compactMoney(tier.minExclusive)}–{compactMoney(tier.maxInclusive)}</strong></div>)}</div>
+
+          <div className="tier-monthly-chart">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 1360, height: 350 }}>
+              <ComposedChart data={tierAnalytics.monthly || []} margin={{ top: 18, right: 12, left: 0, bottom: 0 }}>
+                <CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} />
+                <XAxis dataKey="month" tickFormatter={monthLabel} stroke="#5E6678" tick={{ fontSize: 10 }} />
+                <YAxis stroke="#697285" tick={{ fontSize: 10 }} width={48} />
+                <Tooltip content={<ChartTooltip />} />
+                <Legend wrapperStyle={{ fontSize: 10, paddingTop: 10 }} />
+                {(tierAnalytics.tiers || []).map((tier) => <Bar key={tier.key} dataKey={tier.key} name={tier.label} stackId="tiers" fill={tier.color} radius={tier.key === "safira" ? [5, 5, 0, 0] : undefined} />)}
+                <Line type="monotone" dataKey="noGmvCreators" name="Sem GMV · estado auxiliar" stroke="#596273" strokeWidth={2} strokeDasharray="5 5" dot={false} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div className="tier-transition-kpis">
+            <div className="up"><span>Subiram</span><strong>{integer(selectedTierTransition.promoted)}</strong><small>entre categorias internas</small></div>
+            <div className="down"><span>Cairam</span><strong>{integer(selectedTierTransition.demoted)}</strong><small>entre categorias internas</small></div>
+            <div><span>Permaneceram</span><strong>{integer(selectedTierTransition.retained)}</strong><small>na mesma categoria</small></div>
+            <div className="enter"><span>Entraram em categoria</span><strong>{integer(selectedTierTransition.enteredTier)}</strong><small>vieram de Sem GMV ou fora da base</small></div>
+            <div className="leave"><span>Sairam de categoria</span><strong>{integer(selectedTierTransition.leftTier)}</strong><small>foram para Sem GMV ou fora da base</small></div>
+          </div>
+
+          <div className="tier-transition-layout">
+            <article className="tier-matrix-card">
+              <header><div><span>Matriz de transicao</span><h3>{monthLabel(selectedTierTransition.fromMonth)} → {monthLabel(selectedTierTransition.toMonth)}</h3></div><small>Linha = origem · coluna = destino</small></header>
+              <div className="tier-matrix-scroll"><table><thead><tr><th>De \ Para</th>{(tierAnalytics.tiers || []).map((tier) => <th key={tier.key}>{tier.label}</th>)}<th>Total</th></tr></thead><tbody>{(selectedTierTransition.matrix || []).map((row) => <tr key={row.from}><th>{row.label}</th>{row.cells.map((cell) => <td key={cell.to} className={row.from === cell.to ? "same" : ""} style={{ backgroundColor: `rgba(84,216,232,${0.035 + cell.count / tierMatrixMax * 0.42})` }}><strong>{integer(cell.count)}</strong></td>)}<td className="row-total">{integer(row.total)}</td></tr>)}</tbody></table></div>
+            </article>
+
+            <article className="tier-flow-card">
+              <header><div><span>Maiores mudancas</span><h3>Fluxos fora da diagonal</h3></div><small>Inclui Sem GMV e Fora da base</small></header>
+              <div>{migrationFlows.map((flow) => { const fromIndex = tierOrder.indexOf(flow.from); const toIndex = tierOrder.indexOf(flow.to); const tone = fromIndex >= 0 && toIndex > fromIndex ? "up" : fromIndex >= 0 && toIndex >= 0 && toIndex < fromIndex ? "down" : "neutral"; return <div key={`${flow.from}-${flow.to}`} className={tone}><span>{flow.fromLabel}</span><i>→</i><b>{flow.toLabel}</b><strong>{integer(flow.count)}</strong></div> })}</div>
+            </article>
+          </div>
+
+          <footer><span>{tierAnalytics.definition}</span><em>{tierAnalytics.auxiliaryStates}</em>{selectedTierTransition.aboveSafira > 0 && <b>Atencao: {integer(selectedTierTransition.aboveSafira)} movimentos envolveram GMV acima de R$ 1 mi.</b>}</footer>
+        </section>}
+
         <section className="metric-grid">
           <Metric label="Creators observados" value={integer(summary.observedCreators ?? summary.activeCreators)} note={`${integer(summary.enteredCreators)} apareceram pela primeira vez no relatorio`} />
           <Metric label="Com formulario" value={percent(summary.formMatchRate)} note={`${integer(summary.matchedForms)} @ encontrados na Base de Creators`} tone="blue" />
@@ -409,6 +508,12 @@ export default function CreatorEconomicsView() {
       @media(max-width:1180px){.profit-origin-layout{grid-template-columns:1fr}.profit-origin-chart{border-right:0;border-bottom:1px solid rgba(255,255,255,.065)}.origin-profit-table{grid-template-columns:1fr 1fr;max-height:none}.origin-profit-table>div:nth-child(odd){border-right:1px solid rgba(255,255,255,.055)}}
       @media(max-width:820px){.profitability-head{display:grid}.profit-coverage{min-width:0;width:max-content}.profit-summary{grid-template-columns:1fr 1fr}.profit-summary>div{border-bottom:1px solid rgba(255,255,255,.065)}.profit-summary>div:nth-child(2n){border-right:0}.profit-summary>div:nth-last-child(-n+2){border-bottom:0}.profit-chart-grid{grid-template-columns:1fr}.profit-daily-chart,.profit-origin-card{grid-column:auto}.profit-card>header{display:grid}.profit-card>header small{text-align:left}.profitability-section>footer{grid-template-columns:1fr}.profitability-section>footer b,.profitability-section>footer em{grid-column:auto}.cost-registry>div{grid-template-columns:1fr 1fr}.cost-registry article:nth-child(2){border-right:0}.cost-registry article:nth-child(-n+2){border-bottom:1px solid rgba(255,255,255,.06)}}
       @media(max-width:560px){.profitability-head{padding:23px 17px 18px}.profitability-head h2{font-size:25px}.profit-summary>div{padding:16px 12px}.profit-summary strong{font-size:19px}.profit-summary span{min-height:30px}.profit-warning{margin:12px 12px 0}.profit-chart-grid{padding:12px;gap:12px}.profit-card>header{padding:15px 14px 12px}.profit-card h3{font-size:17px}.profit-chart,.profit-chart-wide{height:330px;padding-left:0;padding-right:0}.profit-origin-chart{height:390px;padding-left:0;padding-right:0}.profit-origin-layout{min-height:0}.origin-profit-table{grid-template-columns:1fr}.origin-profit-table>div:nth-child(odd){border-right:0}.cost-registry{margin:0 12px 14px}.cost-registry>header{display:grid}.cost-registry>div{grid-template-columns:1fr}.cost-registry article{border-right:0;border-bottom:1px solid rgba(255,255,255,.06)}.cost-registry article:last-child{border-bottom:0}.profitability-section>footer{padding:12px 16px}}
+    `}</style>
+    <style jsx global>{`
+      .efficiency-trend-copy{margin:-6px 0 22px;border:1px solid rgba(84,216,232,.23);border-radius:18px;background:linear-gradient(145deg,rgba(84,216,232,.055),rgba(12,15,24,.94) 30%,rgba(8,11,18,.97));overflow:hidden;position:relative}.efficiency-trend-copy:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:linear-gradient(#54D8E8,#F6B84B)}.efficiency-trend-head{display:flex;align-items:flex-start;justify-content:space-between;gap:28px;padding:22px 26px 18px;border-bottom:1px solid rgba(255,255,255,.07)}.efficiency-trend-head h2{margin:0;color:#F7F5FF;font-size:25px;letter-spacing:-.035em}.efficiency-trend-head p{margin:8px 0 0;color:#858DA0;font-size:12px}.efficiency-latest{display:grid;grid-template-columns:1fr 1fr;gap:8px;min-width:430px}.efficiency-latest>div{padding:10px 12px;border:1px solid rgba(255,255,255,.07);border-radius:10px;background:rgba(7,10,16,.45)}.efficiency-latest span{display:block;color:#788194;font:700 8px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.06em}.efficiency-latest strong{display:block;margin:6px 0 3px;font-size:21px}.efficiency-latest>div:first-child strong{color:#54D8E8}.efficiency-latest>div:last-child strong{color:#F6B84B}.efficiency-latest small{color:#737B8D;font-size:9px}.efficiency-trend-chart{height:420px;padding:10px 14px 22px;min-width:0}.efficiency-trend-copy>footer{display:grid;grid-template-columns:1fr 1fr;gap:8px 20px;padding:12px 25px;border-top:1px solid rgba(255,255,255,.07);color:#70788A;font:500 9px ui-monospace,monospace}.efficiency-trend-copy>footer b{color:#BFC5D2}.efficiency-trend-copy>footer em{grid-column:1/-1;font-style:normal;color:#A88A55}
+      .tier-transition-section{margin:26px 0 22px;border:1px solid rgba(98,216,255,.22);border-radius:20px;background:linear-gradient(150deg,rgba(98,216,255,.06),rgba(10,13,20,.98) 22%,rgba(7,10,16,.99));overflow:hidden;position:relative;box-shadow:0 28px 70px rgba(0,0,0,.26)}.tier-transition-section:before{content:"";position:absolute;left:0;right:0;top:0;height:3px;background:linear-gradient(90deg,#7D8A9D,#AEB8C8,#F6B84B,#62D8FF,#6E78FF)}.tier-transition-head{display:flex;justify-content:space-between;align-items:flex-start;gap:28px;padding:27px 28px 22px;border-bottom:1px solid rgba(255,255,255,.07)}.tier-kicker{display:block;color:#62D8FF;font:750 10px ui-monospace,monospace;letter-spacing:.16em;text-transform:uppercase;margin-bottom:8px}.tier-transition-head h2{margin:0;color:#F7F8FC;font-size:30px;letter-spacing:-.04em}.tier-transition-head p{margin:9px 0 0;color:#8790A1;font-size:12px}.tier-transition-head label{display:grid;gap:6px;min-width:220px}.tier-transition-head label span{color:#7E8799;font:700 8px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.08em}.tier-transition-head select{border:1px solid rgba(98,216,255,.24);background:#10151F;color:#F2F6FC;border-radius:10px;padding:10px 12px;font:700 11px Inter}.tier-rules{display:grid;grid-template-columns:repeat(5,1fr);border-bottom:1px solid rgba(255,255,255,.07)}.tier-rules>div{display:grid;grid-template-columns:8px 1fr;gap:3px 8px;padding:15px 17px;border-right:1px solid rgba(255,255,255,.06)}.tier-rules>div:last-child{border-right:0}.tier-rules i{grid-row:1/3;width:8px;height:8px;border-radius:50%;margin-top:3px;background:var(--tier-color);box-shadow:0 0 13px color-mix(in srgb,var(--tier-color) 65%,transparent)}.tier-rules span{font-size:12px;font-weight:800}.tier-rules strong{color:#788195;font:600 9px ui-monospace,monospace}.tier-monthly-chart{height:390px;padding:13px 16px 22px;border-bottom:1px solid rgba(255,255,255,.07)}.tier-transition-kpis{display:grid;grid-template-columns:repeat(5,1fr);border-bottom:1px solid rgba(255,255,255,.07)}.tier-transition-kpis>div{padding:18px;border-right:1px solid rgba(255,255,255,.06)}.tier-transition-kpis>div:last-child{border-right:0}.tier-transition-kpis span{display:block;color:#7E8799;font:750 8px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.08em}.tier-transition-kpis strong{display:block;margin:8px 0 4px;font-size:26px;letter-spacing:-.04em}.tier-transition-kpis small{color:#687184;font-size:9px}.tier-transition-kpis .up strong,.tier-transition-kpis .enter strong{color:#47D7A0}.tier-transition-kpis .down strong,.tier-transition-kpis .leave strong{color:#FF7A8E}.tier-transition-layout{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(320px,.45fr);min-width:0}.tier-matrix-card{border-right:1px solid rgba(255,255,255,.065);min-width:0}.tier-flow-card{min-width:0}.tier-matrix-card>header,.tier-flow-card>header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:18px 20px 14px;border-bottom:1px solid rgba(255,255,255,.06)}.tier-matrix-card header span,.tier-flow-card header span{color:#62D8FF;font:700 8px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.09em}.tier-matrix-card h3,.tier-flow-card h3{margin:5px 0 0;font-size:19px}.tier-matrix-card header small,.tier-flow-card header small{color:#697285;font-size:9px;text-align:right}.tier-matrix-scroll{overflow:auto;padding:14px}.tier-matrix-scroll table{width:100%;min-width:660px;border-collapse:separate;border-spacing:4px}.tier-matrix-scroll th{padding:9px;color:#8992A5;font:700 9px ui-monospace,monospace;text-transform:uppercase;text-align:center}.tier-matrix-scroll tbody th{text-align:left;color:#C4CAD6}.tier-matrix-scroll td{height:46px;border:1px solid rgba(255,255,255,.055);border-radius:7px;text-align:center;color:#DCE3ED}.tier-matrix-scroll td.same{outline:1px solid rgba(246,184,75,.35);color:#FFF0CC}.tier-matrix-scroll td strong{font-size:15px}.tier-matrix-scroll td.row-total{background:rgba(255,255,255,.035);color:#AAB2C1}.tier-flow-card>div{padding:8px 15px 15px}.tier-flow-card>div>div{display:grid;grid-template-columns:minmax(72px,1fr) 15px minmax(82px,1fr) 42px;gap:7px;align-items:center;padding:9px 3px;border-bottom:1px solid rgba(255,255,255,.055);font-size:10px}.tier-flow-card>div>div:last-child{border-bottom:0}.tier-flow-card>div span{color:#7C8597}.tier-flow-card>div i{font-style:normal;color:#4F5869}.tier-flow-card>div b{color:#BEC5D2}.tier-flow-card>div strong{text-align:right;font-size:14px}.tier-flow-card>div .up strong{color:#47D7A0}.tier-flow-card>div .down strong{color:#FF7A8E}.tier-flow-card>div .neutral strong{color:#F6B84B}.tier-transition-section>footer{display:grid;grid-template-columns:1fr 1fr;gap:10px 24px;padding:14px 22px;border-top:1px solid rgba(255,255,255,.07);color:#737C8D;font-size:9px;line-height:1.5}.tier-transition-section>footer em{font-style:normal;color:#9A835E}.tier-transition-section>footer b{grid-column:1/-1;color:#FFB84B}
+      @media(max-width:900px){.efficiency-trend-head,.tier-transition-head{display:grid}.efficiency-latest{min-width:0;width:100%}.tier-rules{grid-template-columns:repeat(3,1fr)}.tier-rules>div:nth-child(3){border-right:0}.tier-rules>div:nth-child(-n+3){border-bottom:1px solid rgba(255,255,255,.06)}.tier-transition-kpis{grid-template-columns:repeat(3,1fr)}.tier-transition-kpis>div:nth-child(3){border-right:0}.tier-transition-kpis>div:nth-child(-n+3){border-bottom:1px solid rgba(255,255,255,.06)}.tier-transition-layout{grid-template-columns:1fr}.tier-matrix-card{border-right:0;border-bottom:1px solid rgba(255,255,255,.065)}}
+      @media(max-width:560px){.efficiency-trend-head{padding:20px 17px}.efficiency-latest{grid-template-columns:1fr}.efficiency-trend-chart{height:350px;padding:8px 0 18px}.efficiency-trend-copy>footer{grid-template-columns:1fr;padding:11px 17px}.efficiency-trend-copy>footer em{grid-column:auto}.tier-transition-head{padding:23px 17px 18px}.tier-transition-head h2{font-size:25px}.tier-transition-head label{min-width:0;width:100%}.tier-rules{grid-template-columns:1fr 1fr}.tier-rules>div{border-bottom:1px solid rgba(255,255,255,.06)}.tier-rules>div:nth-child(odd){border-right:1px solid rgba(255,255,255,.06)}.tier-rules>div:nth-child(even){border-right:0}.tier-rules>div:last-child{grid-column:1/-1;border-bottom:0}.tier-monthly-chart{height:340px;padding-left:0;padding-right:0}.tier-transition-kpis{grid-template-columns:1fr 1fr}.tier-transition-kpis>div{border-bottom:1px solid rgba(255,255,255,.06)!important}.tier-transition-kpis>div:nth-child(odd){border-right:1px solid rgba(255,255,255,.06)!important}.tier-transition-kpis>div:nth-child(even){border-right:0!important}.tier-transition-kpis>div:last-child{grid-column:1/-1;border-bottom:0!important}.tier-matrix-card>header,.tier-flow-card>header{display:grid}.tier-matrix-card header small,.tier-flow-card header small{text-align:left}.tier-matrix-scroll{padding:9px}.tier-transition-section>footer{grid-template-columns:1fr;padding:12px 16px}.tier-transition-section>footer b{grid-column:auto}}
     `}</style>
   </main>
 }
