@@ -51,7 +51,7 @@ async function readDailyAffiliation(from, to) {
   }))).flat().filter((row) => row.day >= `${from}-01` && row.day <= lastDay(to)).sort((a, b) => a.day.localeCompare(b.day))
   if (!rows.length) throw new Error(`ledger diario sem dados entre ${from} e ${to}`)
   for (const row of rows) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(row.day || '') || !Number.isInteger(row.active_creators) || row.active_creators <= 0 || row.downloaded_count !== row.active_creators) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(row.day || '') || !Number.isInteger(row.active_creators) || row.active_creators <= 0 || row.downloaded_count !== row.active_creators || !Number.isFinite(row.gmv_total)) {
       throw new Error(`linha diaria invalida no ledger: ${row.day || 'sem data'}`)
     }
   }
@@ -63,6 +63,7 @@ async function readDailyAffiliation(from, to) {
     date: row.day,
     affiliatedCreators: row.active_creators,
     gmvCreators: Number(row.positive_gmv_creators) || 0,
+    dailyGmv: row.gmv_total,
     complete: row.downloaded_count === row.active_creators,
   }))
   const latest = series.at(-1)
