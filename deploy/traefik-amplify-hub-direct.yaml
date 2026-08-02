@@ -1,0 +1,27 @@
+http:
+  routers:
+    http-custom-amplify-hub-direct:
+      middlewares:
+        - redirect-to-https
+      priority: 10
+      rule: Host(`amplify-hub.72.60.147.19.sslip.io`) && PathPrefix(`/`)
+      service: custom-amplify-hub-direct
+      entryPoints:
+        - http
+    https-custom-amplify-hub-direct:
+      middlewares: []
+      priority: 10
+      rule: Host(`amplify-hub.72.60.147.19.sslip.io`) && PathPrefix(`/`)
+      service: custom-amplify-hub-direct
+      tls:
+        certResolver: letsencrypt
+        domains:
+          - main: amplify-hub.72.60.147.19.sslip.io
+      entryPoints:
+        - https
+  services:
+    custom-amplify-hub-direct:
+      loadBalancer:
+        passHostHeader: true
+        servers:
+          - url: http://10.0.0.1:3010/

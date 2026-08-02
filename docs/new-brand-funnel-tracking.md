@@ -44,7 +44,7 @@ Eventos auxiliares aceitos para diagnostico: `form_start_aula`, `price_reveal_au
 Endpoint de producao:
 
 ```text
-POST https://amplify-hub.t2ffoz.easypanel.host/api/new-brand-funnel/events
+POST https://amplify-hub.72.60.147.19.sslip.io/api/new-brand-funnel/events
 Authorization: Bearer <NEW_BRAND_FUNNEL_INGEST_TOKEN>
 Content-Type: application/json
 ```
