@@ -7,6 +7,7 @@ import { Area, Bar, CartesianGrid, ComposedChart, Legend, Line, ReferenceLine, R
 const money = (value) => Number(value || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 2 })
 const compactMoney = (value) => new Intl.NumberFormat("pt-BR", { notation: "compact", style: "currency", currency: "BRL", maximumFractionDigits: 1 }).format(Number(value || 0))
 const integer = (value) => Number(value || 0).toLocaleString("pt-BR")
+const decimal = (value) => Number(value || 0).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })
 const percent = (value) => `${Number(value || 0).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`
 const ratio = (value) => value == null ? "—" : Number(value) > 0 && Number(value) < 0.01 ? "<0,01x" : `${Number(value).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}x`
 const date = (value) => value ? new Date(`${value.slice(0, 10)}T12:00:00`).toLocaleDateString("pt-BR") : "—"
@@ -120,7 +121,7 @@ export default function CreatorEconomicsView() {
   const [portfolioMonth, setPortfolioMonth] = useState("2026-07")
   const [tierTransitionMonth, setTierTransitionMonth] = useState("2026-07")
   const [movementWindow, setMovementWindow] = useState("30")
-  const [portfolioForecastScenario, setPortfolioForecastScenario] = useState("postFix")
+  const [portfolioForecastScenario, setPortfolioForecastScenario] = useState("moving7d")
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
@@ -181,11 +182,12 @@ export default function CreatorEconomicsView() {
   const lagAnalytics = data?.creatorLagAnalytics || {}
   const portfolioForecast = lagAnalytics.portfolioForecast || {}
   const portfolioForecastScenarios = portfolioForecast.scenarios || []
-  const selectedPortfolioForecast = portfolioForecastScenarios.find((item) => item.key === portfolioForecastScenario) || portfolioForecastScenarios.find((item) => item.key === "postFix") || portfolioForecastScenarios[0] || {}
+  const visiblePortfolioForecastScenarios = portfolioForecastScenarios.filter((item) => item.key === "moving7d" || item.key === "required")
+  const selectedPortfolioForecast = portfolioForecastScenarios.find((item) => item.key === portfolioForecastScenario) || portfolioForecastScenarios.find((item) => item.key === "moving7d") || portfolioForecastScenarios[0] || {}
   const portfolioForecastSeries = portfolioForecast.series || []
-  const selectedActiveKey = `${selectedPortfolioForecast.key || "postFix"}Active`
-  const selectedEntriesKey = `${selectedPortfolioForecast.key || "postFix"}Entries`
-  const selectedExitsKey = `${selectedPortfolioForecast.key || "postFix"}Exits`
+  const selectedActiveKey = `${selectedPortfolioForecast.key || "moving7d"}Active`
+  const selectedEntriesKey = `${selectedPortfolioForecast.key || "moving7d"}Entries`
+  const selectedExitsKey = `${selectedPortfolioForecast.key || "moving7d"}Exits`
   const selectedPortfolioFlowSeries = portfolioForecastSeries.filter((item) => item[selectedEntriesKey] != null || item[selectedExitsKey] != null)
   const maturity = lagAnalytics.maturity || {}
   const maturityPoints = maturity.points || []
@@ -485,25 +487,25 @@ export default function CreatorEconomicsView() {
 
         {portfolioForecastSeries.length > 0 && <section id="portfolio-projection" className="portfolio-projection-section">
           <header className="portfolio-projection-head">
-            <div><span className="portfolio-projection-kicker">Projecao da carteira ate 30/09</span><h2>Entradas menos desvinculacoes: chegamos a 4.008 ativos?</h2><p>O estoque cresce pelas novas entradas e retornos, mas perde creators diariamente por uma taxa proporcional ao tamanho da carteira.</p></div>
-            <div className="portfolio-backtest-pill"><span>Backtest temporal · 14 dias</span><strong>{percent(portfolioForecast.backtest?.modelWapePercent)}</strong><small>WAPE do modelo vs. {percent(portfolioForecast.backtest?.constantStockWapePercent)} com estoque constante</small></div>
+            <div><span className="portfolio-projection-kicker">Projecao pela media movel de 7 dias</span><h2>Com o ritmo atual, chegamos a 4.000 creators ativos?</h2><p>Aplica diariamente as mesmas medias do grafico acima: entradas de 7 dias menos saidas de 7 dias.</p></div>
+            <div className="portfolio-backtest-pill"><span>Resposta ate 30/09</span><strong>{selectedPortfolioForecast.reachesTarget ? "SIM" : "NAO"}</strong><small>{selectedPortfolioForecast.reachesTarget ? "o ritmo atual atinge a meta" : `projecao de ${integer(selectedPortfolioForecast.projectedEndActive)} creators`}</small></div>
           </header>
 
           <div className="portfolio-projection-summary">
             <div><span>Estoque auditado em {date(portfolioForecast.asOf)}</span><strong>{integer(portfolioForecast.currentActive)}</strong><small>creators observados no ledger</small></div>
-            <div><span>Projecao selecionada em 30/09</span><strong>{integer(selectedPortfolioForecast.projectedEndActive)}</strong><small>{selectedPortfolioForecast.gapToTarget >= 0 ? `${integer(selectedPortfolioForecast.gapToTarget)} acima da meta` : `faltam ${integer(Math.abs(selectedPortfolioForecast.gapToTarget || 0))}`}</small></div>
-            <div><span>Meta de ativos</span><strong>{integer(portfolioForecast.targetActive)}</strong><small>alvo executivo para o fim do Q3</small></div>
-            <div><span>Ritmo necessario</span><strong>{integer(portfolioForecast.requiredNewPerDayForTarget)}/dia</strong><small>novos, ja descontando a desvinculacao</small></div>
+            <div><span>Projecao pela media 7d em 30/09</span><strong>{integer(selectedPortfolioForecast.projectedEndActive)}</strong><small>{selectedPortfolioForecast.gapToTarget >= 0 ? `${integer(selectedPortfolioForecast.gapToTarget)} acima da meta` : `faltam ${integer(Math.abs(selectedPortfolioForecast.gapToTarget || 0))}`}</small></div>
+            <div><span>Saldo liquido atual</span><strong>+{decimal(portfolioForecast.movingAverage7d?.netPerDay)}/dia</strong><small>{decimal(portfolioForecast.movingAverage7d?.entriesPerDay)} entradas - {decimal(portfolioForecast.movingAverage7d?.exitsPerDay)} saidas</small></div>
+            <div><span>Data estimada para 4.000</span><strong>{date(portfolioForecast.movingAverage7d?.estimatedTargetDate)}</strong><small>{integer(portfolioForecast.movingAverage7d?.daysToTarget)} dias, se a media se mantiver</small></div>
           </div>
 
           <div className="portfolio-scenario-switch" role="group" aria-label="Cenarios da projecao de carteira">
-            {portfolioForecastScenarios.map((scenario) => <button key={scenario.key} type="button" className={selectedPortfolioForecast.key === scenario.key ? "active" : ""} onClick={() => setPortfolioForecastScenario(scenario.key)}><span>{scenario.label}</span><b>{integer(scenario.projectedEndActive)}</b></button>)}
+            {visiblePortfolioForecastScenarios.map((scenario) => <button key={scenario.key} type="button" className={selectedPortfolioForecast.key === scenario.key ? "active" : ""} onClick={() => setPortfolioForecastScenario(scenario.key)}><span>{scenario.label}</span><b>{integer(scenario.projectedEndActive)}</b></button>)}
           </div>
 
           <div className="portfolio-projection-grid">
             <article className="portfolio-projection-card portfolio-stock-card">
               <header><div><span>Estoque observado + projetado</span><h3>Tendencia diaria de creators ativos</h3></div><small>Um unico eixo Y · contagem de creators</small></header>
-              <div className="portfolio-stock-chart"><ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 1260, height: 410 }}><ComposedChart data={portfolioForecastSeries} margin={{ top: 18, right: 12, left: 2, bottom: 2 }}><CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} /><XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#596273" tick={{ fontSize: 10 }} minTickGap={30} /><YAxis allowDecimals={false} stroke="#687386" tick={{ fontSize: 10 }} width={58} domain={["dataMin - 100", "dataMax + 100"]} /><Tooltip content={<AffiliationMovementTooltip />} /><Legend wrapperStyle={{ fontSize: 10, paddingTop: 10 }} /><Line type="monotone" dataKey="actualActive" name="Ativos observados" stroke="#E8ECF5" strokeWidth={2.8} dot={false} connectNulls={false} /><Line type="monotone" dataKey={selectedActiveKey} name={selectedPortfolioForecast.label || "Cenario selecionado"} stroke="#A99BFF" strokeWidth={3} dot={false} connectNulls={false} />{selectedPortfolioForecast.key !== "required" && <Line type="monotone" dataKey="requiredActive" name="Ritmo necessario" stroke="#47D7A0" strokeWidth={2.2} strokeDasharray="7 5" dot={false} connectNulls={false} />}<Line type="linear" dataKey="targetActive" name="Meta 4.008" stroke="#F6B84B" strokeWidth={1.7} strokeDasharray="3 5" dot={false} /></ComposedChart></ResponsiveContainer></div>
+              <div className="portfolio-stock-chart"><ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 1260, height: 410 }}><ComposedChart data={portfolioForecastSeries} margin={{ top: 18, right: 12, left: 2, bottom: 2 }}><CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} /><XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#596273" tick={{ fontSize: 10 }} minTickGap={30} /><YAxis allowDecimals={false} stroke="#687386" tick={{ fontSize: 10 }} width={58} domain={["dataMin - 100", "dataMax + 100"]} /><Tooltip content={<AffiliationMovementTooltip />} /><Legend wrapperStyle={{ fontSize: 10, paddingTop: 10 }} /><Line type="monotone" dataKey="actualActive" name="Ativos observados" stroke="#E8ECF5" strokeWidth={2.8} dot={false} connectNulls={false} /><Line type="monotone" dataKey={selectedActiveKey} name={selectedPortfolioForecast.label || "Cenario selecionado"} stroke="#A99BFF" strokeWidth={3} dot={false} connectNulls={false} />{selectedPortfolioForecast.key !== "required" && <Line type="monotone" dataKey="requiredActive" name="Ritmo necessario" stroke="#47D7A0" strokeWidth={2.2} strokeDasharray="7 5" dot={false} connectNulls={false} />}<Line type="linear" dataKey="targetActive" name="Meta 4.000" stroke="#F6B84B" strokeWidth={1.7} strokeDasharray="3 5" dot={false} /></ComposedChart></ResponsiveContainer></div>
             </article>
 
             <article className="portfolio-projection-card">
@@ -514,10 +516,10 @@ export default function CreatorEconomicsView() {
             <article className="portfolio-projection-card portfolio-assumption-card">
               <header><div><span>Premissas do cenario</span><h3>{selectedPortfolioForecast.label}</h3></div><small>Atualizado com o ledger fechado</small></header>
               <div className="portfolio-assumption-grid">
-                <div><span>Novos por dia</span><strong>{integer(selectedPortfolioForecast.newCreatorsPerDay)}</strong></div>
-                <div><span>Taxa diaria de desvinculacao</span><strong>{percent(selectedPortfolioForecast.exitRateDailyPercent)}</strong></div>
-                <div><span>Entradas ate 30/09</span><strong>+{integer(selectedPortfolioForecast.projectedEntries)}</strong></div>
-                <div><span>Desvinculacoes ate 30/09</span><strong>-{integer(selectedPortfolioForecast.projectedExits)}</strong></div>
+                <div><span>Entradas · media 7d</span><strong>{decimal(selectedPortfolioForecast.entriesPerDay)}/dia</strong></div>
+                <div><span>Saidas · media 7d</span><strong>{decimal(selectedPortfolioForecast.exitsPerDay)}/dia</strong></div>
+                <div><span>Saldo liquido</span><strong>{selectedPortfolioForecast.netPerDay >= 0 ? "+" : ""}{decimal(selectedPortfolioForecast.netPerDay)}/dia</strong></div>
+                <div><span>Entradas necessarias</span><strong>{decimal(portfolioForecast.movingAverage7d?.requiredEntriesPerDay)}/dia</strong></div>
               </div>
               <p>{selectedPortfolioForecast.note}</p>
             </article>
@@ -530,7 +532,7 @@ export default function CreatorEconomicsView() {
             <div><span>Conversao necessaria restante</span><strong>{percent(portfolioForecast.requiredRemainingBusinessConversionPercent)}</strong><small>atual acumulada: {percent(portfolioForecast.businessConversionCurrentPercent)}</small></div>
           </div>
 
-          <footer className="portfolio-projection-note"><b>Formula:</b> ativos de amanha = ativos de hoje + novos + retornos - desvinculacoes esperadas. <em>{portfolioForecast.caveat}</em></footer>
+          <footer className="portfolio-projection-note"><b>Formula:</b> ativos de amanha = ativos de hoje + media 7d de entradas - media 7d de saidas. <em>{portfolioForecast.caveat} Retornos nao entram porque o grafico de referencia usa somente primeiras aparicoes.</em></footer>
         </section>}
 
         {lagAnalytics.schemaVersion === 1 && <section id="lag-forecast" className="lag-forecast-section">
