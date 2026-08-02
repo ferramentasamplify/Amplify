@@ -463,15 +463,15 @@ export default function CreatorEconomicsView() {
 
         {portfolioForecastSeries.length > 0 && <section id="portfolio-projection" className="portfolio-projection-section">
           <header className="portfolio-projection-head">
-            <div><span className="portfolio-projection-kicker">Projecao pela media movel de 7 dias</span><h2>Com o ritmo atual, chegamos a 4.000 creators ativos?</h2><p>Aplica diariamente as mesmas medias do grafico acima: entradas de 7 dias menos saidas de 7 dias.</p></div>
+            <div><span className="portfolio-projection-kicker">Media movel 7d + saida proporcional</span><h2>Com o ritmo atual, chegamos a 4.000 creators ativos?</h2><p>Mantem a media de entradas dos ultimos 7 dias e aplica a taxa recente de desvinculacao sobre o estoque projetado de cada dia.</p></div>
             <div className="portfolio-backtest-pill"><span>Resposta ate 30/09</span><strong>{selectedPortfolioForecast.reachesTarget ? "SIM" : "NAO"}</strong><small>{selectedPortfolioForecast.reachesTarget ? "o ritmo atual atinge a meta" : `projecao de ${integer(selectedPortfolioForecast.projectedEndActive)} creators`}</small></div>
           </header>
 
           <div className="portfolio-projection-summary">
             <div><span>Estoque auditado em {date(portfolioForecast.asOf)}</span><strong>{integer(portfolioForecast.currentActive)}</strong><small>creators observados no ledger</small></div>
-            <div><span>Projecao pela media 7d em 30/09</span><strong>{integer(selectedPortfolioForecast.projectedEndActive)}</strong><small>{selectedPortfolioForecast.gapToTarget >= 0 ? `${integer(selectedPortfolioForecast.gapToTarget)} acima da meta` : `faltam ${integer(Math.abs(selectedPortfolioForecast.gapToTarget || 0))}`}</small></div>
-            <div><span>Saldo liquido atual</span><strong>+{decimal(portfolioForecast.movingAverage7d?.netPerDay)}/dia</strong><small>{decimal(portfolioForecast.movingAverage7d?.entriesPerDay)} entradas - {decimal(portfolioForecast.movingAverage7d?.exitsPerDay)} saidas</small></div>
-            <div><span>Data estimada para 4.000</span><strong>{date(portfolioForecast.movingAverage7d?.estimatedTargetDate)}</strong><small>{integer(portfolioForecast.movingAverage7d?.daysToTarget)} dias, se a media se mantiver</small></div>
+            <div><span>Projecao proporcional em 30/09</span><strong>{integer(selectedPortfolioForecast.projectedEndActive)}</strong><small>{selectedPortfolioForecast.gapToTarget >= 0 ? `${integer(selectedPortfolioForecast.gapToTarget)} acima da meta` : `faltam ${integer(Math.abs(selectedPortfolioForecast.gapToTarget || 0))}`}</small></div>
+            <div><span>Saldo liquido inicial</span><strong>{portfolioForecast.movingAverage7d?.netPerDay >= 0 ? "+" : ""}{decimal(portfolioForecast.movingAverage7d?.netPerDay)}/dia</strong><small>{decimal(portfolioForecast.movingAverage7d?.entriesPerDay)} entradas - {decimal(portfolioForecast.movingAverage7d?.initialExitsPerDay)} saidas no inicio</small></div>
+            <div><span>Data estimada para 4.000</span><strong>{date(portfolioForecast.movingAverage7d?.estimatedTargetDate)}</strong><small>{portfolioForecast.movingAverage7d?.daysToTarget == null ? "ritmo atual nao sustenta a meta" : `${integer(portfolioForecast.movingAverage7d?.daysToTarget)} dias, com saida proporcional`}</small></div>
           </div>
 
           <div className="portfolio-scenario-switch" role="group" aria-label="Cenarios da projecao de carteira">
@@ -493,8 +493,8 @@ export default function CreatorEconomicsView() {
               <header><div><span>Premissas do cenario</span><h3>{selectedPortfolioForecast.label}</h3></div><small>Atualizado com o ledger fechado</small></header>
               <div className="portfolio-assumption-grid">
                 <div><span>Entradas · media 7d</span><strong>{decimal(selectedPortfolioForecast.entriesPerDay)}/dia</strong></div>
-                <div><span>Saidas · media 7d</span><strong>{decimal(selectedPortfolioForecast.exitsPerDay)}/dia</strong></div>
-                <div><span>Saldo liquido</span><strong>{selectedPortfolioForecast.netPerDay >= 0 ? "+" : ""}{decimal(selectedPortfolioForecast.netPerDay)}/dia</strong></div>
+                <div><span>Taxa de saida · 7d</span><strong>{percent(selectedPortfolioForecast.exitRateDailyPercent)}/dia</strong></div>
+                <div><span>Saidas · inicio → 30/09</span><strong>{decimal(selectedPortfolioForecast.initialExitsPerDay)} → {decimal(selectedPortfolioForecast.finalExitsPerDay)}/dia</strong></div>
                 <div><span>Entradas necessarias</span><strong>{decimal(portfolioForecast.movingAverage7d?.requiredEntriesPerDay)}/dia</strong></div>
               </div>
               <p>{selectedPortfolioForecast.note}</p>
@@ -508,7 +508,7 @@ export default function CreatorEconomicsView() {
             <div><span>Conversao necessaria restante</span><strong>{percent(portfolioForecast.requiredRemainingBusinessConversionPercent)}</strong><small>atual acumulada: {percent(portfolioForecast.businessConversionCurrentPercent)}</small></div>
           </div>
 
-          <footer className="portfolio-projection-note"><b>Formula:</b> ativos de amanha = ativos de hoje + media 7d de entradas - media 7d de saidas. <em>{portfolioForecast.caveat} Retornos nao entram porque o grafico de referencia usa somente primeiras aparicoes.</em></footer>
+          <footer className="portfolio-projection-note"><b>Formula:</b> ativos de amanha = ativos de hoje + media 7d de entradas - (ativos de hoje × taxa diaria de saida 7d). <em>{portfolioForecast.caveat} Retornos nao entram porque o grafico de referencia usa somente primeiras aparicoes.</em></footer>
         </section>}
 
         {lagAnalytics.schemaVersion === 1 && <section id="lag-forecast" className="lag-forecast-section">
