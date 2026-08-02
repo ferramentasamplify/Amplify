@@ -370,11 +370,11 @@ export default function CreatorEconomicsView() {
                   </ComposedChart>
                 </ResponsiveContainer>
               </div>
-              <footer><span>P90 do primeiro GMV entre os ativados: <b>D+{integer(maturity.p90DaysToFirstGmv)}</b>.</span><em>{percent(100 - maturity.activation30Percent)} ainda nao geraram GMV ate D+30.</em></footer>
+              <footer><span>P90 do primeiro GMV entre os ativados: <b>D+{integer(maturity.p90DaysToFirstGmv)}</b>. Top 10% gera <b>{percent(maturity.top10ShareGmv30Percent)}</b> do GMV D0–D30.</span><em>{percent(100 - maturity.activation30Percent)} ainda nao geraram GMV ate D+30.</em></footer>
             </article>
 
             <article className="lag-chart-card">
-              <div className="lag-chart-title"><div><span>Efeito defasado observado</span><h3>Carteira hoje x GMV futuro</h3></div><small>melhor sinal em {integer(lagEffect.bestObservedLagDays)} dias · corr. {Number(lagEffect.bestChangeCorrelation || 0).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}</small></div>
+              <div className="lag-chart-title"><div><span>Efeito defasado observado</span><h3>Variacao da carteira x crescimento futuro do GMV</h3></div><small>pico fraco em {integer(lagEffect.bestObservedLagDays)} dias · corr. {Number(lagEffect.bestStockGrowthCorrelation || 0).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}</small></div>
               <div className="lag-small-chart">
                 <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 610, height: 330 }}>
                   <ComposedChart data={lagEffect.points || []} margin={{ top: 16, right: 8, left: -8, bottom: 2 }}>
@@ -383,12 +383,11 @@ export default function CreatorEconomicsView() {
                     <YAxis stroke="#766F91" tick={{ fontSize: 10 }} width={42} domain={[-1, 1]} />
                     <Tooltip content={<LagTooltip />} />
                     <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
-                    <Line type="monotone" dataKey="changeCorrelation" name="Correlacao das variacoes" stroke="#A99BFF" strokeWidth={3} dot={false} />
-                    <Line type="monotone" dataKey="levelCorrelation" name="Correlacao dos niveis" stroke="#54D8E8" strokeOpacity={.45} strokeWidth={1.5} dot={false} />
+                    <Line type="monotone" dataKey="stockGrowthCorrelation" name="Correlacao estacionarizada" stroke="#A99BFF" strokeWidth={3} dot={false} />
                   </ComposedChart>
                 </ResponsiveContainer>
               </div>
-              <footer><span>O sinal agregado mais forte apareceu entre <b>30 e 60 dias</b>.</span><em>Correlacao observacional; nao prova que a mudanca da carteira causou sozinha o GMV.</em></footer>
+              <footer><span>A coorte aponta efeito economico principalmente entre <b>D+7 e D+21</b>.</span><em>O sinal agregado e fraco: nao ha evidencia de um atraso fixo nem de causalidade.</em></footer>
             </article>
           </div>
 
@@ -412,11 +411,11 @@ export default function CreatorEconomicsView() {
             </article>
 
             <article className="drawdown-card">
-              <span className="drawdown-kicker">O caso dos 2,2 mil → 1,7 mil</span>
+              <span className="drawdown-kicker">O caso dos 2 mil → 1,78 mil</span>
               <h3>A queda de volume nao virou uma queda proporcional de GMV.</h3>
               <div className="drawdown-stats">
                 <div><span>Carteira</span><strong>{integer(stockDrawdown.peakStock)} → {integer(stockDrawdown.troughStock)}</strong><small>{date(stockDrawdown.peakDate)} a {date(stockDrawdown.troughDate)}</small></div>
-                <div><span>GMV medio 7d</span><strong>{compactMoney(stockDrawdown.peakGmv7d)} → {compactMoney(stockDrawdown.troughGmv7d)}</strong><small>subiu enquanto a carteira caiu</small></div>
+                <div><span>GMV · 30d antes → 30d depois</span><strong>{compactMoney(stockDrawdown.prior30Gmv)} → {compactMoney(stockDrawdown.future30Gmv)}</strong><small>{Number(stockDrawdown.futureVsPriorGmvPercent || 0) >= 0 ? "+" : ""}{percent(stockDrawdown.futureVsPriorGmvPercent)} mesmo com a queda</small></div>
                 <div><span>GMV previo dos que sairam</span><strong>{percent(stockDrawdown.lostShareOfPeakPrior30Gmv)}</strong><small>do GMV da carteira no pico</small></div>
                 <div><span>GMV deles nos 30d seguintes</span><strong>{percent(stockDrawdown.lostCreatorsShareOfFuture30Gmv)}</strong><small>do GMV total seguinte</small></div>
               </div>
