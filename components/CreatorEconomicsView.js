@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { Area, Bar, CartesianGrid, ComposedChart, Legend, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
+import { deriveCreatorBaseHealth } from "../lib/creator-base-health.mjs"
 
 const money = (value) => Number(value || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 2 })
 const compactMoney = (value) => new Intl.NumberFormat("pt-BR", { notation: "compact", style: "currency", currency: "BRL", maximumFractionDigits: 1 }).format(Number(value || 0))
@@ -38,11 +39,6 @@ function DailyGmvTooltip({ active, payload, label }) {
   return <div className="chart-tip"><strong>{date(label)}</strong>{payload.filter((item) => item.value != null).map((item) => <div key={item.dataKey}><i style={{ background: item.color }} /><span>{item.name}</span><b>{["dailyGmv", "gmvAverage7Days", "gmvTotal30Days"].includes(item.dataKey) ? money(item.value) : integer(item.value)}</b></div>)}</div>
 }
 
-function ConcentrationTooltip({ active, payload, label }) {
-  if (!active || !payload?.length) return null
-  return <div className="chart-tip"><strong>{date(label)}</strong>{payload.filter((item) => item.value != null).map((item) => <div key={item.dataKey}><i style={{ background: item.color }} /><span>{item.name}</span><b>{item.dataKey === "gmv80CreatorShareActivePercent30Days" ? percent(item.value) : integer(item.value)}</b></div>)}</div>
-}
-
 function FlowAnalysisTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null
   return <div className="chart-tip"><strong>{date(label)}</strong>{payload.filter((item) => item.value != null).map((item) => <div key={item.dataKey}><i style={{ background: item.color }} /><span>{item.name}</span><b>{item.dataKey.endsWith("Average7Days") ? Number(item.value).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : signedInteger(item.value)}</b></div>)}</div>
@@ -59,9 +55,9 @@ function ProfitabilityTooltip({ active, payload, label }) {
   return <div className="chart-tip"><strong>{title}</strong>{payload.filter((item) => item.value != null).map((item) => <div key={item.dataKey}><i style={{ background: item.color }} /><span>{item.name}</span><b>{money(item.value)}</b></div>)}</div>
 }
 
-function EfficiencyTooltip({ active, payload, label }) {
+function BaseHealthTooltip({ active, payload, label, mode = "percent" }) {
   if (!active || !payload?.length) return null
-  return <div className="chart-tip"><strong>{date(label)}</strong>{payload.filter((item) => item.value != null).map((item) => <div key={item.dataKey}><i style={{ background: item.color }} /><span>{item.name}</span><b>{item.dataKey.startsWith("conversion") ? percent(item.value) : money(item.value)}</b></div>)}</div>
+  return <div className="chart-tip"><strong>{date(label)}</strong>{payload.filter((item) => item.value != null).map((item) => <div key={item.dataKey}><i style={{ background: item.color }} /><span>{item.name}</span><b>{mode === "money" ? money(item.value) : percent(item.value)}</b></div>)}</div>
 }
 
 function ForecastTooltip({ active, payload, label }) {
@@ -159,26 +155,14 @@ export default function CreatorEconomicsView() {
     const weekDay = new Date(`${item.date}T12:00:00Z`).getUTCDay()
     return weekDay === 0 || weekDay === 6 ? [index] : []
   }), [dailyData])
-  const trendData = useMemo(() => dailyData.map((item, index, rows) => {
-    const conversionRate = item.affiliatedCreators ? item.gmvCreators / item.affiliatedCreators * 100 : 0
-    const gmvPerAffiliated = item.affiliatedCreators ? item.dailyGmv / item.affiliatedCreators : 0
-    const window = rows.slice(Math.max(0, index - 6), index + 1)
-    const average = (key) => window.reduce((total, row) => total + Number(row[key] || 0), 0) / window.length
-    return {
-      date: item.date,
-      conversionRate,
-      gmvPerAffiliated,
-      conversionRate7d: index < 6 ? null : average("gmvCreators") / average("affiliatedCreators") * 100,
-      gmvPerAffiliated7d: index < 6 ? null : average("dailyGmv") / average("affiliatedCreators"),
-    }
-  }), [dailyData])
+  const baseHealthData = useMemo(() => deriveCreatorBaseHealth(dailyData), [dailyData])
   const affiliation = data?.affiliationDaily || {}
   const portfolio = data?.portfolioAnalytics || {}
   const tierAnalytics = data?.creatorTierAnalytics || {}
   const selectedTierTransition = tierAnalytics.transitions?.find((item) => item.toMonth === tierTransitionMonth) || tierAnalytics.transitions?.at(-1) || {}
   const tierMatrixMax = Math.max(1, ...(selectedTierTransition.matrix || []).flatMap((row) => row.cells.map((cell) => cell.count)))
   const migrationFlows = (selectedTierTransition.flows || []).filter((flow) => flow.from !== flow.to).slice(0, 10)
-  const trendLatest = trendData.at(-1) || {}
+  const baseHealthLatest = baseHealthData.at(-1) || {}
   const lagAnalytics = data?.creatorLagAnalytics || {}
   const portfolioForecast = lagAnalytics.portfolioForecast || {}
   const portfolioForecastScenarios = portfolioForecast.scenarios || []
@@ -433,56 +417,48 @@ export default function CreatorEconomicsView() {
           <footer><span><b>GMV acumulado 30d</b> = soma do GMV diario da data e dos 29 dias anteriores.</span><em>Usa a mesma janela da serie de creators com GMV.</em></footer>
         </section>
 
-        <section className="affiliation-gmv-copy affiliation-gmv-concentration-copy">
-          <header className="affiliation-gmv-head">
-            <div><span className="affiliation-kicker">Concentracao · Pareto movel</span><h2>Qual percentual da base gera 80% do GMV</h2><p>Para cada data, ordena a carteira ativa pelo GMV acumulado nos ultimos 30 dias e encontra o menor grupo que concentra 80% do valor.</p></div>
-            <div className="daily-gmv-latest"><span>Base que gera 80% do GMV ate {date(affiliation.latest?.date)}</span><strong>{percent(affiliation.latest?.gmv80CreatorShareActivePercent30Days)}</strong><small>{integer(affiliation.latest?.gmv80CreatorCount30Days)} creators da carteira ativa</small></div>
-          </header>
-          <div className="affiliation-gmv-chart">
-            <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 1240, height: 390 }}>
-              <ComposedChart data={dailyData} margin={{ top: 20, right: 8, left: -8, bottom: 2 }}>
-                <defs><linearGradient id="affiliationGmvConcentrationFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#A99BFF" stopOpacity=".27" /><stop offset="100%" stopColor="#A99BFF" stopOpacity=".01" /></linearGradient></defs>
-                <CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} />
-                <CartesianGrid horizontal={false} stroke="rgba(173,181,197,.18)" strokeWidth={0.8} verticalCoordinatesGenerator={({ offset }) => weekendIndexes.map((index) => offset.left + index * offset.width / Math.max(1, dailyData.length - 1))} />
-                <XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#5E6678" tick={{ fontSize: 10 }} minTickGap={32} />
-                <YAxis yAxisId="creators" stroke="#766F91" tick={{ fontSize: 10 }} width={52} domain={[0, "dataMax + 40"]} />
-                <YAxis yAxisId="share" orientation="right" stroke="#A5783A" tickFormatter={percent} tick={{ fontSize: 10 }} width={58} domain={[0, "dataMax + 1"]} />
-                <Tooltip content={<ConcentrationTooltip />} />
-                <Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} />
-                <Area yAxisId="creators" type="monotone" dataKey="affiliatedCreators" name="Agenciados no dia" stroke="#A99BFF" strokeWidth={3} fill="url(#affiliationGmvConcentrationFill)" dot={false} activeDot={{ r: 5, strokeWidth: 0 }} />
-                <Line yAxisId="creators" type="monotone" dataKey="gmv80CreatorCount30Days" name="Creators que geram 80% do GMV 30d" stroke="#54D8E8" strokeWidth={2.4} dot={false} />
-                <Line yAxisId="share" type="monotone" dataKey="gmv80CreatorShareActivePercent30Days" name="% da base que gera 80% do GMV" stroke="#F6B84B" strokeWidth={2.8} dot={false} activeDot={{ r: 4, strokeWidth: 0 }} />
-              </ComposedChart>
-            </ResponsiveContainer>
-          </div>
-          <footer><span><b>Grupo dos 80%:</b> menor numero de creators ativos cuja soma do GMV positivo em D-29 a D atinge 80% do GMV da carteira ativa.</span><em>Percentual = creators do grupo ÷ agenciados no dia. Nos primeiros 29 dias, usa os dias disponiveis.</em></footer>
-        </section>
-
-        <section className="efficiency-trend-copy">
-          <header className="efficiency-trend-head">
-            <div><span className="affiliation-kicker">Tendencia da monetizacao</span><h2>Conversao e GMV medio por agenciado</h2><p>Copia analitica do ledger diario. As linhas fortes mostram a media movel de 7 dias; as linhas finas preservam o valor real de cada data.</p></div>
-            <div className="efficiency-latest">
-              <div><span>Base com GMV · media 7d</span><strong>{percent(trendLatest.conversionRate7d)}</strong><small>{percent(trendLatest.conversionRate)} no ultimo dia</small></div>
-              <div><span>GMV / agenciado · media 7d</span><strong>{money(trendLatest.gmvPerAffiliated7d)}</strong><small>{money(trendLatest.gmvPerAffiliated)} no ultimo dia</small></div>
+        <section id="creator-base-health" className="creator-base-health">
+          <header className="base-health-head">
+            <div><span className="affiliation-kicker">Saude da base · janela movel de 30 dias</span><h2>Produtividade, cobertura e concentracao do GMV</h2><p>Cada grafico responde uma pergunta com numerador e denominador proprios, sempre usando a mesma janela movel de 30 dias.</p></div>
+            <div className="base-health-latest">
+              <div><span>GMV por monetizado 30d</span><strong>{money(baseHealthLatest.gmvPerMonetizedCreator30Days)}</strong><small>{integer(baseHealthLatest.gmvCreatorsLast30Days)} creators com GMV</small></div>
+              <div><span>Base que gera 80%</span><strong>{percent(baseHealthLatest.gmv80CreatorShareActivePercent30Days)}</strong><small>{integer(baseHealthLatest.gmv80CreatorCount30Days)} creators</small></div>
+              <div><span>Cobertura com GMV 30d</span><strong>{percent(baseHealthLatest.monetizedCoverage30DaysPercent)}</strong><small>sobre {integer(baseHealthLatest.affiliatedCreators)} agenciados</small></div>
+              <div><span>Monetizados que geram 80%</span><strong>{percent(baseHealthLatest.gmv80CreatorShareMonetizedPercent30Days)}</strong><small>concentracao dentro da base produtiva</small></div>
             </div>
           </header>
-          <div className="efficiency-trend-chart">
-            <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 1240, height: 390 }}>
-              <ComposedChart data={trendData} margin={{ top: 20, right: 8, left: -4, bottom: 2 }}>
-                <CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} />
-                <XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#5E6678" tick={{ fontSize: 10 }} minTickGap={32} />
-                <YAxis yAxisId="conversion" stroke="#3D7B82" tickFormatter={(value) => `${Math.round(Number(value))}%`} tick={{ fontSize: 10 }} width={50} domain={[0, "dataMax + 5"]} />
-                <YAxis yAxisId="productivity" orientation="right" stroke="#A5783A" tickFormatter={compactMoney} tick={{ fontSize: 10 }} width={72} />
-                <Tooltip content={<EfficiencyTooltip />} />
-                <Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} />
-                <Line yAxisId="conversion" type="monotone" dataKey="conversionRate" name="% com GMV · diario" stroke="#54D8E8" strokeOpacity={.24} strokeWidth={1.2} dot={false} />
-                <Line yAxisId="conversion" type="monotone" dataKey="conversionRate7d" name="% com GMV · media 7d" stroke="#54D8E8" strokeWidth={3} dot={false} connectNulls={false} />
-                <Line yAxisId="productivity" type="monotone" dataKey="gmvPerAffiliated" name="GMV por agenciado · diario" stroke="#F6B84B" strokeOpacity={.22} strokeWidth={1.2} dot={false} />
-                <Line yAxisId="productivity" type="monotone" dataKey="gmvPerAffiliated7d" name="GMV por agenciado · media 7d" stroke="#F6B84B" strokeWidth={3} dot={false} connectNulls={false} />
-              </ComposedChart>
-            </ResponsiveContainer>
+
+          <div className="base-health-grid">
+            <article className="base-health-card base-health-productivity">
+              <header><div><span>Produtividade economica</span><h3>GMV medio por agenciado com GMV nos ultimos 30 dias</h3></div><strong>{money(baseHealthLatest.gmvPerMonetizedCreator30Days)}</strong></header>
+              <p>GMV acumulado da janela dividido somente pelos creators unicos que tiveram algum GMV na mesma janela.</p>
+              <div className="base-health-chart"><ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 610, height: 300 }}><ComposedChart data={baseHealthData} margin={{ top: 15, right: 8, left: 0, bottom: 2 }}><CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} /><CartesianGrid horizontal={false} stroke="rgba(173,181,197,.15)" strokeWidth={0.7} verticalCoordinatesGenerator={({ offset }) => weekendIndexes.map((index) => offset.left + index * offset.width / Math.max(1, baseHealthData.length - 1))} /><XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#5E6678" tick={{ fontSize: 9 }} minTickGap={28} /><YAxis stroke="#A5783A" tickFormatter={compactMoney} tick={{ fontSize: 9 }} width={62} domain={["dataMin - 300", "dataMax + 300"]} /><Tooltip content={<BaseHealthTooltip mode="money" />} /><Line type="monotone" dataKey="gmvPerMonetizedCreator30Days" name="GMV medio por monetizado 30d" stroke="#F6B84B" strokeWidth={3} dot={false} connectNulls={false} /></ComposedChart></ResponsiveContainer></div>
+              <footer>Quanto maior, maior o GMV medio gerado por creator que efetivamente monetizou.</footer>
+            </article>
+
+            <article className="base-health-card base-health-active-concentration">
+              <header><div><span>Dependencia economica</span><h3>Percentual da base ativa que gera 80% do GMV</h3></div><strong>{percent(baseHealthLatest.gmv80CreatorShareActivePercent30Days)}</strong></header>
+              <p>Menor grupo necessario para atingir 80% do GMV movel, dividido por todos os agenciados observados no dia.</p>
+              <div className="base-health-chart"><ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 610, height: 300 }}><ComposedChart data={baseHealthData} margin={{ top: 15, right: 8, left: 0, bottom: 2 }}><CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} /><CartesianGrid horizontal={false} stroke="rgba(173,181,197,.15)" strokeWidth={0.7} verticalCoordinatesGenerator={({ offset }) => weekendIndexes.map((index) => offset.left + index * offset.width / Math.max(1, baseHealthData.length - 1))} /><XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#5E6678" tick={{ fontSize: 9 }} minTickGap={28} /><YAxis stroke="#C68C58" tickFormatter={percent} tick={{ fontSize: 9 }} width={48} domain={[0, "dataMax + 1"]} /><Tooltip content={<BaseHealthTooltip />} /><Line type="monotone" dataKey="gmv80CreatorShareActivePercent30Days" name="% da base que gera 80% do GMV" stroke="#FF9B68" strokeWidth={3} dot={false} connectNulls={false} /></ComposedChart></ResponsiveContainer></div>
+              <footer>Quanto menor, maior a dependencia de poucos creators para sustentar o GMV.</footer>
+            </article>
+
+            <article className="base-health-card base-health-coverage">
+              <header><div><span>Amplitude da monetizacao</span><h3>Percentual da base com GMV nos ultimos 30 dias</h3></div><strong>{percent(baseHealthLatest.monetizedCoverage30DaysPercent)}</strong></header>
+              <p>Creators unicos com algum GMV em D-29 a D divididos pelo total de agenciados observados na data.</p>
+              <div className="base-health-chart"><ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 610, height: 300 }}><ComposedChart data={baseHealthData} margin={{ top: 15, right: 8, left: 0, bottom: 2 }}><CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} /><CartesianGrid horizontal={false} stroke="rgba(173,181,197,.15)" strokeWidth={0.7} verticalCoordinatesGenerator={({ offset }) => weekendIndexes.map((index) => offset.left + index * offset.width / Math.max(1, baseHealthData.length - 1))} /><XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#5E6678" tick={{ fontSize: 9 }} minTickGap={28} /><YAxis stroke="#3D7B82" tickFormatter={percent} tick={{ fontSize: 9 }} width={48} domain={[(value) => Math.max(0, Math.floor(value - 5)), (value) => Math.min(100, Math.ceil(value + 5))]} /><Tooltip content={<BaseHealthTooltip />} /><Line type="monotone" dataKey="monetizedCoverage30DaysPercent" name="% da base com GMV 30d" stroke="#54D8E8" strokeWidth={3} dot={false} connectNulls={false} /></ComposedChart></ResponsiveContainer></div>
+              <footer>Quanto maior, mais ampla e menos ociosa esta a monetizacao da carteira.</footer>
+            </article>
+
+            <article className="base-health-card base-health-monetized-concentration">
+              <header><div><span>Concentracao entre produtivos</span><h3>Percentual dos monetizados que gera 80% do GMV</h3></div><strong>{percent(baseHealthLatest.gmv80CreatorShareMonetizedPercent30Days)}</strong></header>
+              <p>Creators do grupo dos 80% divididos apenas pelos creators que tiveram algum GMV nos mesmos 30 dias.</p>
+              <div className="base-health-chart"><ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 610, height: 300 }}><ComposedChart data={baseHealthData} margin={{ top: 15, right: 8, left: 0, bottom: 2 }}><CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} /><CartesianGrid horizontal={false} stroke="rgba(173,181,197,.15)" strokeWidth={0.7} verticalCoordinatesGenerator={({ offset }) => weekendIndexes.map((index) => offset.left + index * offset.width / Math.max(1, baseHealthData.length - 1))} /><XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#5E6678" tick={{ fontSize: 9 }} minTickGap={28} /><YAxis stroke="#7568A8" tickFormatter={percent} tick={{ fontSize: 9 }} width={48} domain={[0, "dataMax + 2"]} /><Tooltip content={<BaseHealthTooltip />} /><Line type="monotone" dataKey="gmv80CreatorShareMonetizedPercent30Days" name="% dos monetizados que gera 80%" stroke="#A99BFF" strokeWidth={3} dot={false} connectNulls={false} /></ComposedChart></ResponsiveContainer></div>
+              <footer>Se cair, o resultado esta ficando mais concentrado mesmo dentro do grupo que monetiza.</footer>
+            </article>
           </div>
-          <footer><span><b>% com GMV</b> = creators com GMV ÷ agenciados no dia.</span><span><b>GMV por agenciado</b> = GMV diario ÷ agenciados no dia.</span><em>Media movel de 7 dias reduz picos sem apagar o valor diario real.</em></footer>
+
+          <footer className="base-health-method"><span><b>Mesma janela:</b> todos os numeradores e denominadores economicos usam D-29 a D.</span><span><b>Base ativa:</b> agenciados observados no ledger na data.</span><em>Nos primeiros 29 dias do historico, a janela usa somente os dias disponiveis.</em></footer>
         </section>
 
         {portfolioForecastSeries.length > 0 && <section id="portfolio-projection" className="portfolio-projection-section">
@@ -953,6 +929,16 @@ export default function CreatorEconomicsView() {
       .tier-transition-section{margin:26px 0 22px;border:1px solid rgba(98,216,255,.22);border-radius:20px;background:linear-gradient(150deg,rgba(98,216,255,.06),rgba(10,13,20,.98) 22%,rgba(7,10,16,.99));overflow:hidden;position:relative;box-shadow:0 28px 70px rgba(0,0,0,.26)}.tier-transition-section:before{content:"";position:absolute;left:0;right:0;top:0;height:3px;background:linear-gradient(90deg,#7D8A9D,#AEB8C8,#F6B84B,#62D8FF,#6E78FF)}.tier-transition-head{display:flex;justify-content:space-between;align-items:flex-start;gap:28px;padding:27px 28px 22px;border-bottom:1px solid rgba(255,255,255,.07)}.tier-kicker{display:block;color:#62D8FF;font:750 10px ui-monospace,monospace;letter-spacing:.16em;text-transform:uppercase;margin-bottom:8px}.tier-transition-head h2{margin:0;color:#F7F8FC;font-size:30px;letter-spacing:-.04em}.tier-transition-head p{margin:9px 0 0;color:#8790A1;font-size:12px}.tier-transition-head label{display:grid;gap:6px;min-width:220px}.tier-transition-head label span{color:#7E8799;font:700 8px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.08em}.tier-transition-head select{border:1px solid rgba(98,216,255,.24);background:#10151F;color:#F2F6FC;border-radius:10px;padding:10px 12px;font:700 11px Inter}.tier-rules{display:grid;grid-template-columns:repeat(5,1fr);border-bottom:1px solid rgba(255,255,255,.07)}.tier-rules>div{display:grid;grid-template-columns:8px 1fr;gap:3px 8px;padding:15px 17px;border-right:1px solid rgba(255,255,255,.06)}.tier-rules>div:last-child{border-right:0}.tier-rules i{grid-row:1/3;width:8px;height:8px;border-radius:50%;margin-top:3px;background:var(--tier-color);box-shadow:0 0 13px color-mix(in srgb,var(--tier-color) 65%,transparent)}.tier-rules span{font-size:12px;font-weight:800}.tier-rules strong{color:#788195;font:600 9px ui-monospace,monospace}.tier-monthly-chart{height:390px;padding:13px 16px 22px;border-bottom:1px solid rgba(255,255,255,.07)}.tier-transition-kpis{display:grid;grid-template-columns:repeat(5,1fr);border-bottom:1px solid rgba(255,255,255,.07)}.tier-transition-kpis>div{padding:18px;border-right:1px solid rgba(255,255,255,.06)}.tier-transition-kpis>div:last-child{border-right:0}.tier-transition-kpis span{display:block;color:#7E8799;font:750 8px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.08em}.tier-transition-kpis strong{display:block;margin:8px 0 4px;font-size:26px;letter-spacing:-.04em}.tier-transition-kpis small{color:#687184;font-size:9px}.tier-transition-kpis .up strong,.tier-transition-kpis .enter strong{color:#47D7A0}.tier-transition-kpis .down strong,.tier-transition-kpis .leave strong{color:#FF7A8E}.tier-transition-layout{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(320px,.45fr);min-width:0}.tier-matrix-card{border-right:1px solid rgba(255,255,255,.065);min-width:0}.tier-flow-card{min-width:0}.tier-matrix-card>header,.tier-flow-card>header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:18px 20px 14px;border-bottom:1px solid rgba(255,255,255,.06)}.tier-matrix-card header span,.tier-flow-card header span{color:#62D8FF;font:700 8px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.09em}.tier-matrix-card h3,.tier-flow-card h3{margin:5px 0 0;font-size:19px}.tier-matrix-card header small,.tier-flow-card header small{color:#697285;font-size:9px;text-align:right}.tier-matrix-scroll{overflow:auto;padding:14px}.tier-matrix-scroll table{width:100%;min-width:660px;border-collapse:separate;border-spacing:4px}.tier-matrix-scroll th{padding:9px;color:#8992A5;font:700 9px ui-monospace,monospace;text-transform:uppercase;text-align:center}.tier-matrix-scroll tbody th{text-align:left;color:#C4CAD6}.tier-matrix-scroll td{height:46px;border:1px solid rgba(255,255,255,.055);border-radius:7px;text-align:center;color:#DCE3ED}.tier-matrix-scroll td.same{outline:1px solid rgba(246,184,75,.35);color:#FFF0CC}.tier-matrix-scroll td strong{font-size:15px}.tier-matrix-scroll td.row-total{background:rgba(255,255,255,.035);color:#AAB2C1}.tier-flow-card>div{padding:8px 15px 15px}.tier-flow-card>div>div{display:grid;grid-template-columns:minmax(72px,1fr) 15px minmax(82px,1fr) 42px;gap:7px;align-items:center;padding:9px 3px;border-bottom:1px solid rgba(255,255,255,.055);font-size:10px}.tier-flow-card>div>div:last-child{border-bottom:0}.tier-flow-card>div span{color:#7C8597}.tier-flow-card>div i{font-style:normal;color:#4F5869}.tier-flow-card>div b{color:#BEC5D2}.tier-flow-card>div strong{text-align:right;font-size:14px}.tier-flow-card>div .up strong{color:#47D7A0}.tier-flow-card>div .down strong{color:#FF7A8E}.tier-flow-card>div .neutral strong{color:#F6B84B}.tier-transition-section>footer{display:grid;grid-template-columns:1fr 1fr;gap:10px 24px;padding:14px 22px;border-top:1px solid rgba(255,255,255,.07);color:#737C8D;font-size:9px;line-height:1.5}.tier-transition-section>footer em{font-style:normal;color:#9A835E}.tier-transition-section>footer b{grid-column:1/-1;color:#FFB84B}
       @media(max-width:900px){.efficiency-trend-head,.tier-transition-head,.lag-forecast-head{display:grid}.efficiency-latest{min-width:0;width:100%}.lag-model-pill{min-width:0;width:max-content}.lag-answer-grid,.lag-forecast-summary{grid-template-columns:1fr 1fr}.lag-answer:nth-child(2),.lag-forecast-summary>div:nth-child(2){border-right:0}.lag-answer:nth-child(-n+2),.lag-forecast-summary>div:nth-child(-n+2){border-bottom:1px solid rgba(255,255,255,.06)}.lag-chart-grid,.lag-pattern-grid{grid-template-columns:1fr}.lag-chart-grid>.lag-chart-card:first-child,.cohort-card{border-right:0;border-bottom:1px solid rgba(255,255,255,.07)}.tier-rules{grid-template-columns:repeat(3,1fr)}.tier-rules>div:nth-child(3){border-right:0}.tier-rules>div:nth-child(-n+3){border-bottom:1px solid rgba(255,255,255,.06)}.tier-transition-kpis{grid-template-columns:repeat(3,1fr)}.tier-transition-kpis>div:nth-child(3){border-right:0}.tier-transition-kpis>div:nth-child(-n+3){border-bottom:1px solid rgba(255,255,255,.06)}.tier-transition-layout{grid-template-columns:1fr}.tier-matrix-card{border-right:0;border-bottom:1px solid rgba(255,255,255,.065)}}
       @media(max-width:560px){.efficiency-trend-head{padding:20px 17px}.efficiency-latest{grid-template-columns:1fr}.efficiency-trend-chart{height:350px;padding:8px 0 18px}.efficiency-trend-copy>footer{grid-template-columns:1fr;padding:11px 17px}.efficiency-trend-copy>footer em{grid-column:auto}.lag-forecast-head{padding:23px 17px 18px}.lag-forecast-head h2{font-size:25px}.lag-answer-grid,.lag-forecast-summary{grid-template-columns:1fr}.lag-answer,.lag-forecast-summary>div{border-right:0!important;border-bottom:1px solid rgba(255,255,255,.06)!important;padding:17px}.lag-answer:last-child,.lag-forecast-summary>div:last-child{border-bottom:0!important}.lag-chart-title{display:grid;padding:17px 16px 7px}.lag-chart-title>small{text-align:left}.lag-forecast-chart{height:340px;padding-left:0;padding-right:0}.lag-small-chart,.cohort-chart{height:330px;padding-left:0;padding-right:0}.drawdown-card{padding:19px 16px}.drawdown-stats{grid-template-columns:1fr}.drawdown-stats>div{border-right:0!important;border-bottom:1px solid rgba(255,255,255,.06)!important}.drawdown-stats>div:last-child{border-bottom:0!important}.lag-method-note{margin:13px 12px 15px}.tier-transition-head{padding:23px 17px 18px}.tier-transition-head h2{font-size:25px}.tier-transition-head label{min-width:0;width:100%}.tier-rules{grid-template-columns:1fr 1fr}.tier-rules>div{border-bottom:1px solid rgba(255,255,255,.06)}.tier-rules>div:nth-child(odd){border-right:1px solid rgba(255,255,255,.06)}.tier-rules>div:nth-child(even){border-right:0}.tier-rules>div:last-child{grid-column:1/-1;border-bottom:0}.tier-monthly-chart{height:340px;padding-left:0;padding-right:0}.tier-transition-kpis{grid-template-columns:1fr 1fr}.tier-transition-kpis>div{border-bottom:1px solid rgba(255,255,255,.06)!important}.tier-transition-kpis>div:nth-child(odd){border-right:1px solid rgba(255,255,255,.06)!important}.tier-transition-kpis>div:nth-child(even){border-right:0!important}.tier-transition-kpis>div:last-child{grid-column:1/-1;border-bottom:0!important}.tier-matrix-card>header,.tier-flow-card>header{display:grid}.tier-matrix-card header small,.tier-flow-card header small{text-align:left}.tier-matrix-scroll{padding:9px}.tier-transition-section>footer{grid-template-columns:1fr;padding:12px 16px}.tier-transition-section>footer b{grid-column:auto}}
+    `}</style>
+    <style jsx global>{`
+      .creator-base-health{margin:26px 0 22px;border:1px solid rgba(84,216,232,.24);border-radius:20px;background:linear-gradient(150deg,rgba(84,216,232,.07),rgba(10,13,20,.98) 23%,rgba(7,10,16,.99));overflow:hidden;position:relative;box-shadow:0 28px 70px rgba(0,0,0,.27)}
+      .creator-base-health:before{content:"";position:absolute;left:0;right:0;top:0;height:3px;background:linear-gradient(90deg,#F6B84B,#FF9B68 32%,#54D8E8 66%,#A99BFF)}
+      .base-health-head{display:flex;align-items:flex-start;justify-content:space-between;gap:28px;padding:27px 28px 22px;border-bottom:1px solid rgba(255,255,255,.07)}
+      .base-health-head h2{margin:0;color:#F7F8FC;font-size:30px;letter-spacing:-.04em}.base-health-head p{margin:9px 0 0;color:#8790A1;font-size:12px;max-width:690px;line-height:1.5}
+      .base-health-latest{display:grid;grid-template-columns:1fr 1fr;gap:8px;min-width:470px}.base-health-latest>div{padding:10px 12px;border:1px solid rgba(255,255,255,.07);border-radius:11px;background:rgba(7,10,16,.5);min-width:0}.base-health-latest span{display:block;color:#788194;font:700 8px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.06em;line-height:1.35}.base-health-latest strong{display:block;margin:6px 0 3px;color:#F5F6FA;font-size:20px;letter-spacing:-.03em}.base-health-latest>div:nth-child(1) strong{color:#F6B84B}.base-health-latest>div:nth-child(2) strong{color:#FF9B68}.base-health-latest>div:nth-child(3) strong{color:#54D8E8}.base-health-latest>div:nth-child(4) strong{color:#A99BFF}.base-health-latest small{display:block;color:#737B8D;font-size:9px;line-height:1.35}
+      .base-health-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:16px}.base-health-card{min-width:0;border:1px solid rgba(255,255,255,.075);border-radius:15px;background:rgba(9,12,19,.72);overflow:hidden}.base-health-card>header{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;padding:18px 18px 7px}.base-health-card>header span{display:block;color:#7D8698;font:750 8px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.09em}.base-health-card h3{margin:6px 0 0;color:#EFF2F8;font-size:18px;line-height:1.15;letter-spacing:-.025em;max-width:410px}.base-health-card>header>strong{flex:0 0 auto;color:#F5F6FA;font-size:24px;letter-spacing:-.04em}.base-health-productivity>header>strong{color:#F6B84B}.base-health-active-concentration>header>strong{color:#FF9B68}.base-health-coverage>header>strong{color:#54D8E8}.base-health-monetized-concentration>header>strong{color:#A99BFF}.base-health-card>p{min-height:44px;margin:0;padding:0 18px;color:#778195;font-size:10px;line-height:1.45}.base-health-chart{height:310px;padding:4px 5px 14px;min-width:0}.base-health-card>footer{min-height:48px;padding:12px 17px;border-top:1px solid rgba(255,255,255,.06);color:#8B94A5;font-size:10px;line-height:1.45}.base-health-method{display:grid;grid-template-columns:1fr 1fr;gap:7px 18px;padding:13px 25px;border-top:1px solid rgba(255,255,255,.07);color:#70788A;font:500 9px ui-monospace,monospace}.base-health-method b{color:#BFC5D2}.base-health-method em{grid-column:1/-1;color:#A88A55;font-style:normal}
+      @media(max-width:900px){.base-health-head{display:grid}.base-health-latest{min-width:0;width:100%}.base-health-grid{grid-template-columns:1fr}}
+      @media(max-width:560px){.base-health-head{padding:23px 17px 18px}.base-health-head h2{font-size:25px}.base-health-latest{grid-template-columns:1fr}.base-health-grid{padding:12px;gap:12px}.base-health-card>header{display:grid;padding:17px 15px 7px}.base-health-card>header>strong{font-size:22px}.base-health-card h3{font-size:17px}.base-health-card>p{min-height:0;padding:0 15px 8px}.base-health-chart{height:320px;padding-left:0;padding-right:0}.base-health-method{grid-template-columns:1fr;padding:12px 16px}.base-health-method em{grid-column:auto}}
     `}</style>
     <style jsx global>{`
       .portfolio-projection-section{margin:26px 0 22px;border:1px solid rgba(71,215,160,.25);border-radius:20px;background:linear-gradient(150deg,rgba(71,215,160,.07),rgba(10,13,20,.98) 24%,rgba(7,10,16,.99));overflow:hidden;position:relative;box-shadow:0 28px 70px rgba(0,0,0,.28)}
