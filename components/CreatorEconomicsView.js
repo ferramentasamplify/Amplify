@@ -53,6 +53,26 @@ function EfficiencyTooltip({ active, payload, label }) {
   return <div className="chart-tip"><strong>{date(label)}</strong>{payload.filter((item) => item.value != null).map((item) => <div key={item.dataKey}><i style={{ background: item.color }} /><span>{item.name}</span><b>{item.dataKey.startsWith("conversion") ? percent(item.value) : money(item.value)}</b></div>)}</div>
 }
 
+function ForecastTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null
+  return <div className="chart-tip"><strong>{date(label)}</strong>{payload.filter((item) => item.value != null && item.dataKey !== "forecastBand").map((item) => <div key={item.dataKey}><i style={{ background: item.color }} /><span>{item.name}</span><b>{money(item.value)}</b></div>)}</div>
+}
+
+function MaturityTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null
+  return <div className="chart-tip"><strong>D+{integer(label)}</strong>{payload.filter((item) => item.value != null).map((item) => <div key={item.dataKey}><i style={{ background: item.color }} /><span>{item.name}</span><b>{item.dataKey === "activationPercent" ? percent(item.value) : money(item.value)}</b></div>)}</div>
+}
+
+function LagTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null
+  return <div className="chart-tip"><strong>{integer(label)} dias depois</strong>{payload.filter((item) => item.value != null).map((item) => <div key={item.dataKey}><i style={{ background: item.color }} /><span>{item.name}</span><b>{Number(item.value).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}</b></div>)}</div>
+}
+
+function CohortTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null
+  return <div className="chart-tip"><strong>{monthLabel(label)}</strong>{payload.filter((item) => item.value != null).map((item) => <div key={item.dataKey}><i style={{ background: item.color }} /><span>{item.name}</span><b>{item.dataKey === "activation30Percent" ? percent(item.value) : item.dataKey === "matureEntrants" ? integer(item.value) : money(item.value)}</b></div>)}</div>
+}
+
 function MovementTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null
   return <div className="chart-tip movement-tip"><strong>{date(label)}</strong>{payload.filter((item) => item.value != null).map((item) => <div key={item.dataKey}><i style={{ background: item.color }} /><span>{item.name}</span><b>{item.dataKey === "exitedGmvPrior30d" ? money(item.value) : integer(item.value)}</b></div>)}</div>
@@ -143,6 +163,23 @@ export default function CreatorEconomicsView() {
   const tierMatrixMax = Math.max(1, ...(selectedTierTransition.matrix || []).flatMap((row) => row.cells.map((cell) => cell.count)))
   const migrationFlows = (selectedTierTransition.flows || []).filter((flow) => flow.from !== flow.to).slice(0, 10)
   const trendLatest = trendData.at(-1) || {}
+  const lagAnalytics = data?.creatorLagAnalytics || {}
+  const maturity = lagAnalytics.maturity || {}
+  const maturityPoints = maturity.points || []
+  const maturity14 = maturityPoints.find((item) => item.ageDays === 14) || {}
+  const maturity30 = maturityPoints.find((item) => item.ageDays === 30) || {}
+  const maturity60 = maturityPoints.find((item) => item.ageDays === 60) || {}
+  const lagEffect = lagAnalytics.lagEffect || {}
+  const stockDrawdown = lagAnalytics.stockDrawdown || {}
+  const lagForecast = lagAnalytics.forecast || {}
+  const recentCohorts = lagForecast.recentCohorts || {}
+  const forecastData = useMemo(() => {
+    const series = (data?.creatorLagAnalytics?.forecast?.series || []).map((item) => ({ ...item, forecastBand: item.lowGmv == null || item.highGmv == null ? null : [item.lowGmv, item.highGmv] }))
+    const bridgeIndex = series.findLastIndex((item) => item.actualGmv != null)
+    if (bridgeIndex >= 0 && series[bridgeIndex + 1]?.forecastGmv != null) series[bridgeIndex] = { ...series[bridgeIndex], forecastGmv: series[bridgeIndex].actualGmv, forecastBand: [series[bridgeIndex].actualGmv, series[bridgeIndex].actualGmv] }
+    return series
+  }, [data])
+  const matureMonthlyCohorts = (maturity.monthlyCohorts || []).filter((item) => item.complete)
   const movementData = portfolio.daily || []
   const movementChartData = movementWindow === "all" ? movementData : movementData.slice(-Number(movementWindow))
   const latestMovement = movementData.at(-1) || {}
@@ -276,6 +313,119 @@ export default function CreatorEconomicsView() {
           </div>
           <footer><span><b>% com GMV</b> = creators com GMV ÷ agenciados no dia.</span><span><b>GMV por agenciado</b> = GMV diario ÷ agenciados no dia.</span><em>Media movel de 7 dias reduz picos sem apagar o valor diario real.</em></footer>
         </section>
+
+        {lagAnalytics.schemaVersion === 1 && <section id="lag-forecast" className="lag-forecast-section">
+          <header className="lag-forecast-head">
+            <div><span className="lag-kicker">Efeito do agenciamento + previsao</span><h2>Quando a carteira vira GMV e dinheiro para a Amplify</h2><p>Coortes por primeira aparicao, efeito defasado observado e previsao de 30 dias com erro historico medido.</p></div>
+            <div className="lag-model-pill"><span>Backtest · {integer(lagForecast.backtestOrigins)} janelas</span><strong>erro {percent(lagForecast.backtestWapePercent)}</strong><small>WAPE fora da amostra</small></div>
+          </header>
+
+          <div className="lag-answer-grid">
+            <article className="lag-answer main"><span>O efeito demora um mes?</span><strong>Nao e um atraso fixo.</strong><p>Entre os que ativam, a mediana do primeiro GMV e <b>{integer(maturity.medianDaysToFirstGmvAmongActivated30)} dias</b>. O efeito da safra continua acumulando entre D+30 e D+60.</p></article>
+            <article className="lag-answer"><span>Ate D+14</span><strong>{percent(maturity14.activationPercent)}</strong><p>ja geraram algum GMV · receita Amplify media acumulada {money(maturity14.averageCumulativeAmplifyRevenue)}</p></article>
+            <article className="lag-answer"><span>Ate D+30</span><strong>{percent(maturity30.activationPercent)}</strong><p>ja geraram algum GMV · receita Amplify media acumulada {money(maturity30.averageCumulativeAmplifyRevenue)}</p></article>
+            <article className="lag-answer"><span>Ate D+60</span><strong>{percent(maturity60.activationPercent)}</strong><p>ja geraram algum GMV · receita Amplify media acumulada {money(maturity60.averageCumulativeAmplifyRevenue)}</p></article>
+          </div>
+
+          <div className="lag-forecast-summary">
+            <div><span>Previsao de GMV · proximos 30 dias</span><strong>{compactMoney(lagForecast.forecastGmv)}</strong><small>faixa historica: {compactMoney(lagForecast.lowGmv)} a {compactMoney(lagForecast.highGmv)}</small></div>
+            <div><span>Receita Amplify estimada</span><strong>{compactMoney(lagForecast.forecastAmplifyRevenue)}</strong><small>{compactMoney(lagForecast.lowAmplifyRevenue)} a {compactMoney(lagForecast.highAmplifyRevenue)} · nao e lucro</small></div>
+            <div><span>Entraram nos ultimos 30 dias</span><strong>{integer(recentCohorts.entrantsLast30Days)}</strong><small>contribuicao esperada nos proximos 30d: {compactMoney(recentCohorts.expectedNext30Gmv)} de GMV</small></div>
+            <div><span>Ritmo atual de entrada</span><strong>{integer(Math.round(recentCohorts.projectedNewEntrantsNext30 || 0))}</strong><small>projecao para 30d · efeito dentro da janela: {compactMoney(recentCohorts.expectedWithinHorizonGmvFromFutureEntrants)}</small></div>
+          </div>
+
+          <article className="lag-chart-card forecast-card">
+            <div className="lag-chart-title"><div><span>Previsao operacional</span><h3>GMV diario observado e proximos 30 dias</h3></div><small>Faixa P10–P90 dos erros do backtest</small></div>
+            <div className="lag-forecast-chart">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 1240, height: 390 }}>
+                <ComposedChart data={forecastData} margin={{ top: 18, right: 8, left: -8, bottom: 2 }}>
+                  <defs><linearGradient id="forecastBandFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#A99BFF" stopOpacity=".30" /><stop offset="100%" stopColor="#A99BFF" stopOpacity=".05" /></linearGradient></defs>
+                  <CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} />
+                  <XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#5E6678" tick={{ fontSize: 10 }} minTickGap={28} />
+                  <YAxis stroke="#766F91" tickFormatter={compactMoney} tick={{ fontSize: 10 }} width={72} />
+                  <Tooltip content={<ForecastTooltip />} />
+                  <Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} />
+                  <Area type="monotone" dataKey="forecastBand" name="Faixa prevista" stroke="none" fill="url(#forecastBandFill)" connectNulls={false} />
+                  <Line type="monotone" dataKey="actualGmv" name="GMV observado" stroke="#54D8E8" strokeWidth={2.6} dot={false} connectNulls={false} />
+                  <Line type="monotone" dataKey="forecastGmv" name="GMV previsto" stroke="#C6B9FF" strokeWidth={3} strokeDasharray="7 5" dot={false} connectNulls={false} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+          </article>
+
+          <div className="lag-chart-grid">
+            <article className="lag-chart-card">
+              <div className="lag-chart-title"><div><span>Maturacao das novas safras</span><h3>Ativacao e receita por creator</h3></div><small>{integer(maturity.cohortCreators)} primeiras aparicoes analisadas</small></div>
+              <div className="lag-small-chart">
+                <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 610, height: 330 }}>
+                  <ComposedChart data={maturityPoints} margin={{ top: 16, right: 0, left: -8, bottom: 2 }}>
+                    <CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} />
+                    <XAxis dataKey="ageDays" tickFormatter={(value) => `D+${value}`} stroke="#5E6678" tick={{ fontSize: 10 }} minTickGap={24} />
+                    <YAxis yAxisId="activation" stroke="#3D7B82" tickFormatter={(value) => `${Math.round(value)}%`} tick={{ fontSize: 10 }} width={46} domain={[0, 100]} />
+                    <YAxis yAxisId="revenue" orientation="right" stroke="#A5783A" tickFormatter={compactMoney} tick={{ fontSize: 10 }} width={62} />
+                    <Tooltip content={<MaturityTooltip />} />
+                    <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
+                    <Line yAxisId="activation" type="monotone" dataKey="activationPercent" name="Ativados com GMV" stroke="#54D8E8" strokeWidth={3} dot={false} />
+                    <Line yAxisId="revenue" type="monotone" dataKey="averageCumulativeAmplifyRevenue" name="Receita Amplify media acumulada" stroke="#F6B84B" strokeWidth={3} dot={false} />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+              <footer><span>P90 do primeiro GMV entre os ativados: <b>D+{integer(maturity.p90DaysToFirstGmv)}</b>.</span><em>{percent(100 - maturity.activation30Percent)} ainda nao geraram GMV ate D+30.</em></footer>
+            </article>
+
+            <article className="lag-chart-card">
+              <div className="lag-chart-title"><div><span>Efeito defasado observado</span><h3>Carteira hoje x GMV futuro</h3></div><small>melhor sinal em {integer(lagEffect.bestObservedLagDays)} dias · corr. {Number(lagEffect.bestChangeCorrelation || 0).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}</small></div>
+              <div className="lag-small-chart">
+                <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 610, height: 330 }}>
+                  <ComposedChart data={lagEffect.points || []} margin={{ top: 16, right: 8, left: -8, bottom: 2 }}>
+                    <CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} />
+                    <XAxis dataKey="lagDays" tickFormatter={(value) => `${value}d`} stroke="#5E6678" tick={{ fontSize: 10 }} minTickGap={22} />
+                    <YAxis stroke="#766F91" tick={{ fontSize: 10 }} width={42} domain={[-1, 1]} />
+                    <Tooltip content={<LagTooltip />} />
+                    <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
+                    <Line type="monotone" dataKey="changeCorrelation" name="Correlacao das variacoes" stroke="#A99BFF" strokeWidth={3} dot={false} />
+                    <Line type="monotone" dataKey="levelCorrelation" name="Correlacao dos niveis" stroke="#54D8E8" strokeOpacity={.45} strokeWidth={1.5} dot={false} />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+              <footer><span>O sinal agregado mais forte apareceu entre <b>30 e 60 dias</b>.</span><em>Correlacao observacional; nao prova que a mudanca da carteira causou sozinha o GMV.</em></footer>
+            </article>
+          </div>
+
+          <div className="lag-pattern-grid">
+            <article className="lag-chart-card cohort-card">
+              <div className="lag-chart-title"><div><span>Qualidade das safras</span><h3>Ativacao e receita aos 30 dias</h3></div><small>somente meses com janela D+30 completa</small></div>
+              <div className="lag-small-chart cohort-chart">
+                <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 760, height: 330 }}>
+                  <ComposedChart data={matureMonthlyCohorts} margin={{ top: 16, right: 4, left: -6, bottom: 2 }}>
+                    <CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} />
+                    <XAxis dataKey="month" tickFormatter={monthLabel} stroke="#5E6678" tick={{ fontSize: 10 }} />
+                    <YAxis yAxisId="revenue" stroke="#A5783A" tickFormatter={compactMoney} tick={{ fontSize: 10 }} width={62} />
+                    <YAxis yAxisId="activation" orientation="right" stroke="#3D7B82" tickFormatter={(value) => `${Math.round(value)}%`} tick={{ fontSize: 10 }} width={48} domain={[0, 100]} />
+                    <Tooltip content={<CohortTooltip />} />
+                    <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
+                    <Bar yAxisId="revenue" dataKey="averageAmplifyRevenue30" name="Receita Amplify media em 30d" fill="#F6B84B" radius={[7, 7, 0, 0]} maxBarSize={42} />
+                    <Line yAxisId="activation" type="monotone" dataKey="activation30Percent" name="Ativacao ate D+30" stroke="#54D8E8" strokeWidth={3} dot={{ r: 3 }} />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+            </article>
+
+            <article className="drawdown-card">
+              <span className="drawdown-kicker">O caso dos 2,2 mil → 1,7 mil</span>
+              <h3>A queda de volume nao virou uma queda proporcional de GMV.</h3>
+              <div className="drawdown-stats">
+                <div><span>Carteira</span><strong>{integer(stockDrawdown.peakStock)} → {integer(stockDrawdown.troughStock)}</strong><small>{date(stockDrawdown.peakDate)} a {date(stockDrawdown.troughDate)}</small></div>
+                <div><span>GMV medio 7d</span><strong>{compactMoney(stockDrawdown.peakGmv7d)} → {compactMoney(stockDrawdown.troughGmv7d)}</strong><small>subiu enquanto a carteira caiu</small></div>
+                <div><span>GMV previo dos que sairam</span><strong>{percent(stockDrawdown.lostShareOfPeakPrior30Gmv)}</strong><small>do GMV da carteira no pico</small></div>
+                <div><span>GMV deles nos 30d seguintes</span><strong>{percent(stockDrawdown.lostCreatorsShareOfFuture30Gmv)}</strong><small>do GMV total seguinte</small></div>
+              </div>
+              <p>Foram <b>{integer(stockDrawdown.lostCreators)} saidas</b> e {integer(stockDrawdown.gainedCreators)} entradas entre os dois pontos. Quem saiu tinha GMV mediano de apenas <b>{money(stockDrawdown.lostMedianPrior30Gmv)}</b> nos 30 dias anteriores. Por isso, prever so pela quantidade de agenciados seria enganoso: <b>qualidade e ativacao pesam mais que o estoque bruto.</b></p>
+            </article>
+          </div>
+
+          <div className="lag-method-note"><b>Leitura financeira:</b> receita Amplify = 10% da comissao estimada do creator. Isto mede receita bruta gerada pela safra; payback liquido so existira quando o custo real de agenciamento e operacao estiver cadastrado.</div>
+        </section>}
 
         <section className="affiliation-movement-copy">
           <header className="affiliation-movement-head">
@@ -511,9 +661,10 @@ export default function CreatorEconomicsView() {
     `}</style>
     <style jsx global>{`
       .efficiency-trend-copy{margin:-6px 0 22px;border:1px solid rgba(84,216,232,.23);border-radius:18px;background:linear-gradient(145deg,rgba(84,216,232,.055),rgba(12,15,24,.94) 30%,rgba(8,11,18,.97));overflow:hidden;position:relative}.efficiency-trend-copy:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:linear-gradient(#54D8E8,#F6B84B)}.efficiency-trend-head{display:flex;align-items:flex-start;justify-content:space-between;gap:28px;padding:22px 26px 18px;border-bottom:1px solid rgba(255,255,255,.07)}.efficiency-trend-head h2{margin:0;color:#F7F5FF;font-size:25px;letter-spacing:-.035em}.efficiency-trend-head p{margin:8px 0 0;color:#858DA0;font-size:12px}.efficiency-latest{display:grid;grid-template-columns:1fr 1fr;gap:8px;min-width:430px}.efficiency-latest>div{padding:10px 12px;border:1px solid rgba(255,255,255,.07);border-radius:10px;background:rgba(7,10,16,.45)}.efficiency-latest span{display:block;color:#788194;font:700 8px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.06em}.efficiency-latest strong{display:block;margin:6px 0 3px;font-size:21px}.efficiency-latest>div:first-child strong{color:#54D8E8}.efficiency-latest>div:last-child strong{color:#F6B84B}.efficiency-latest small{color:#737B8D;font-size:9px}.efficiency-trend-chart{height:420px;padding:10px 14px 22px;min-width:0}.efficiency-trend-copy>footer{display:grid;grid-template-columns:1fr 1fr;gap:8px 20px;padding:12px 25px;border-top:1px solid rgba(255,255,255,.07);color:#70788A;font:500 9px ui-monospace,monospace}.efficiency-trend-copy>footer b{color:#BFC5D2}.efficiency-trend-copy>footer em{grid-column:1/-1;font-style:normal;color:#A88A55}
+      .lag-forecast-section{margin:26px 0 22px;border:1px solid rgba(169,155,255,.24);border-radius:20px;background:linear-gradient(150deg,rgba(169,155,255,.075),rgba(10,13,20,.98) 24%,rgba(7,10,16,.99));overflow:hidden;position:relative;box-shadow:0 28px 70px rgba(0,0,0,.27)}.lag-forecast-section:before{content:"";position:absolute;left:0;right:0;top:0;height:3px;background:linear-gradient(90deg,#A99BFF,#54D8E8 48%,#F6B84B)}.lag-forecast-head{display:flex;align-items:flex-start;justify-content:space-between;gap:28px;padding:27px 28px 22px;border-bottom:1px solid rgba(255,255,255,.07)}.lag-kicker{display:block;color:#B9ADFF;font:750 10px ui-monospace,monospace;letter-spacing:.16em;text-transform:uppercase;margin-bottom:8px}.lag-forecast-head h2{margin:0;color:#F7F8FC;font-size:30px;letter-spacing:-.04em;max-width:820px}.lag-forecast-head p{margin:9px 0 0;color:#8790A1;font-size:12px}.lag-model-pill{min-width:205px;padding:12px 14px;border:1px solid rgba(169,155,255,.2);border-radius:12px;background:rgba(169,155,255,.055)}.lag-model-pill span{display:block;color:#9287D0;font:750 8px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.08em}.lag-model-pill strong{display:block;margin:5px 0 2px;color:#D8D1FF;font-size:20px}.lag-model-pill small{color:#737C8E;font-size:9px}.lag-answer-grid{display:grid;grid-template-columns:1.45fr repeat(3,1fr);border-bottom:1px solid rgba(255,255,255,.07)}.lag-answer{padding:20px;border-right:1px solid rgba(255,255,255,.06);min-width:0}.lag-answer:last-child{border:0}.lag-answer.main{background:linear-gradient(135deg,rgba(169,155,255,.08),transparent)}.lag-answer span,.lag-forecast-summary span,.drawdown-stats span{display:block;color:#7E8799;font:750 8px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.08em}.lag-answer strong{display:block;margin:8px 0 7px;font-size:22px;letter-spacing:-.04em;color:#F4F5FA}.lag-answer:not(.main) strong{color:#54D8E8;font-size:26px}.lag-answer p{margin:0;color:#788195;font-size:10px;line-height:1.55}.lag-answer p b{color:#C9CED9}.lag-forecast-summary{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid rgba(255,255,255,.07)}.lag-forecast-summary>div{padding:19px 20px;border-right:1px solid rgba(255,255,255,.06)}.lag-forecast-summary>div:last-child{border:0}.lag-forecast-summary strong{display:block;margin:8px 0 5px;color:#F2F4FA;font-size:25px;letter-spacing:-.045em;white-space:nowrap}.lag-forecast-summary>div:first-child strong{color:#C6B9FF}.lag-forecast-summary>div:nth-child(2) strong{color:#F6B84B}.lag-forecast-summary small{display:block;color:#6F788B;font-size:9px;line-height:1.45}.lag-chart-card{min-width:0;background:rgba(8,11,18,.58)}.forecast-card{border-bottom:1px solid rgba(255,255,255,.07)}.lag-chart-title{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;padding:19px 21px 8px}.lag-chart-title span{display:block;color:#8E83CD;font:750 8px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.09em}.lag-chart-title h3{margin:5px 0 0;font-size:19px;letter-spacing:-.025em}.lag-chart-title>small{color:#717A8D;font-size:9px;text-align:right;line-height:1.45}.lag-forecast-chart{height:400px;padding:6px 14px 20px;min-width:0}.lag-chart-grid{display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid rgba(255,255,255,.07)}.lag-chart-grid>.lag-chart-card:first-child{border-right:1px solid rgba(255,255,255,.07)}.lag-small-chart{height:330px;padding:3px 10px 18px;min-width:0}.lag-chart-card>footer{display:grid;gap:5px;padding:11px 20px;border-top:1px solid rgba(255,255,255,.06);color:#717A8D;font-size:9px;line-height:1.45}.lag-chart-card>footer b{color:#BEC4D0}.lag-chart-card>footer em{font-style:normal;color:#A88A55}.lag-pattern-grid{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(380px,.8fr);border-bottom:1px solid rgba(255,255,255,.07)}.cohort-card{border-right:1px solid rgba(255,255,255,.07)}.cohort-chart{height:350px}.drawdown-card{padding:24px;background:linear-gradient(145deg,rgba(255,100,124,.055),transparent)}.drawdown-kicker{display:block;color:#FF8A9E;font:750 9px ui-monospace,monospace;letter-spacing:.1em;text-transform:uppercase}.drawdown-card h3{margin:10px 0 19px;font-size:23px;line-height:1.12;letter-spacing:-.035em}.drawdown-stats{display:grid;grid-template-columns:1fr 1fr;border:1px solid rgba(255,255,255,.07);border-radius:12px;overflow:hidden}.drawdown-stats>div{padding:13px;border-right:1px solid rgba(255,255,255,.06);border-bottom:1px solid rgba(255,255,255,.06)}.drawdown-stats>div:nth-child(2n){border-right:0}.drawdown-stats>div:nth-last-child(-n+2){border-bottom:0}.drawdown-stats strong{display:block;margin:7px 0 4px;color:#F1F3F8;font-size:17px;letter-spacing:-.035em}.drawdown-stats small{color:#6F788B;font-size:8px;line-height:1.35}.drawdown-card>p{margin:18px 0 0;color:#828B9D;font-size:11px;line-height:1.65}.drawdown-card>p b{color:#D3D7E0}.lag-method-note{margin:16px 20px 20px;padding:12px 14px;border:1px solid rgba(246,184,75,.16);border-radius:10px;background:rgba(246,184,75,.035);color:#817A69;font-size:10px;line-height:1.55}.lag-method-note b{color:#F6B84B}
       .tier-transition-section{margin:26px 0 22px;border:1px solid rgba(98,216,255,.22);border-radius:20px;background:linear-gradient(150deg,rgba(98,216,255,.06),rgba(10,13,20,.98) 22%,rgba(7,10,16,.99));overflow:hidden;position:relative;box-shadow:0 28px 70px rgba(0,0,0,.26)}.tier-transition-section:before{content:"";position:absolute;left:0;right:0;top:0;height:3px;background:linear-gradient(90deg,#7D8A9D,#AEB8C8,#F6B84B,#62D8FF,#6E78FF)}.tier-transition-head{display:flex;justify-content:space-between;align-items:flex-start;gap:28px;padding:27px 28px 22px;border-bottom:1px solid rgba(255,255,255,.07)}.tier-kicker{display:block;color:#62D8FF;font:750 10px ui-monospace,monospace;letter-spacing:.16em;text-transform:uppercase;margin-bottom:8px}.tier-transition-head h2{margin:0;color:#F7F8FC;font-size:30px;letter-spacing:-.04em}.tier-transition-head p{margin:9px 0 0;color:#8790A1;font-size:12px}.tier-transition-head label{display:grid;gap:6px;min-width:220px}.tier-transition-head label span{color:#7E8799;font:700 8px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.08em}.tier-transition-head select{border:1px solid rgba(98,216,255,.24);background:#10151F;color:#F2F6FC;border-radius:10px;padding:10px 12px;font:700 11px Inter}.tier-rules{display:grid;grid-template-columns:repeat(5,1fr);border-bottom:1px solid rgba(255,255,255,.07)}.tier-rules>div{display:grid;grid-template-columns:8px 1fr;gap:3px 8px;padding:15px 17px;border-right:1px solid rgba(255,255,255,.06)}.tier-rules>div:last-child{border-right:0}.tier-rules i{grid-row:1/3;width:8px;height:8px;border-radius:50%;margin-top:3px;background:var(--tier-color);box-shadow:0 0 13px color-mix(in srgb,var(--tier-color) 65%,transparent)}.tier-rules span{font-size:12px;font-weight:800}.tier-rules strong{color:#788195;font:600 9px ui-monospace,monospace}.tier-monthly-chart{height:390px;padding:13px 16px 22px;border-bottom:1px solid rgba(255,255,255,.07)}.tier-transition-kpis{display:grid;grid-template-columns:repeat(5,1fr);border-bottom:1px solid rgba(255,255,255,.07)}.tier-transition-kpis>div{padding:18px;border-right:1px solid rgba(255,255,255,.06)}.tier-transition-kpis>div:last-child{border-right:0}.tier-transition-kpis span{display:block;color:#7E8799;font:750 8px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.08em}.tier-transition-kpis strong{display:block;margin:8px 0 4px;font-size:26px;letter-spacing:-.04em}.tier-transition-kpis small{color:#687184;font-size:9px}.tier-transition-kpis .up strong,.tier-transition-kpis .enter strong{color:#47D7A0}.tier-transition-kpis .down strong,.tier-transition-kpis .leave strong{color:#FF7A8E}.tier-transition-layout{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(320px,.45fr);min-width:0}.tier-matrix-card{border-right:1px solid rgba(255,255,255,.065);min-width:0}.tier-flow-card{min-width:0}.tier-matrix-card>header,.tier-flow-card>header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:18px 20px 14px;border-bottom:1px solid rgba(255,255,255,.06)}.tier-matrix-card header span,.tier-flow-card header span{color:#62D8FF;font:700 8px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.09em}.tier-matrix-card h3,.tier-flow-card h3{margin:5px 0 0;font-size:19px}.tier-matrix-card header small,.tier-flow-card header small{color:#697285;font-size:9px;text-align:right}.tier-matrix-scroll{overflow:auto;padding:14px}.tier-matrix-scroll table{width:100%;min-width:660px;border-collapse:separate;border-spacing:4px}.tier-matrix-scroll th{padding:9px;color:#8992A5;font:700 9px ui-monospace,monospace;text-transform:uppercase;text-align:center}.tier-matrix-scroll tbody th{text-align:left;color:#C4CAD6}.tier-matrix-scroll td{height:46px;border:1px solid rgba(255,255,255,.055);border-radius:7px;text-align:center;color:#DCE3ED}.tier-matrix-scroll td.same{outline:1px solid rgba(246,184,75,.35);color:#FFF0CC}.tier-matrix-scroll td strong{font-size:15px}.tier-matrix-scroll td.row-total{background:rgba(255,255,255,.035);color:#AAB2C1}.tier-flow-card>div{padding:8px 15px 15px}.tier-flow-card>div>div{display:grid;grid-template-columns:minmax(72px,1fr) 15px minmax(82px,1fr) 42px;gap:7px;align-items:center;padding:9px 3px;border-bottom:1px solid rgba(255,255,255,.055);font-size:10px}.tier-flow-card>div>div:last-child{border-bottom:0}.tier-flow-card>div span{color:#7C8597}.tier-flow-card>div i{font-style:normal;color:#4F5869}.tier-flow-card>div b{color:#BEC5D2}.tier-flow-card>div strong{text-align:right;font-size:14px}.tier-flow-card>div .up strong{color:#47D7A0}.tier-flow-card>div .down strong{color:#FF7A8E}.tier-flow-card>div .neutral strong{color:#F6B84B}.tier-transition-section>footer{display:grid;grid-template-columns:1fr 1fr;gap:10px 24px;padding:14px 22px;border-top:1px solid rgba(255,255,255,.07);color:#737C8D;font-size:9px;line-height:1.5}.tier-transition-section>footer em{font-style:normal;color:#9A835E}.tier-transition-section>footer b{grid-column:1/-1;color:#FFB84B}
-      @media(max-width:900px){.efficiency-trend-head,.tier-transition-head{display:grid}.efficiency-latest{min-width:0;width:100%}.tier-rules{grid-template-columns:repeat(3,1fr)}.tier-rules>div:nth-child(3){border-right:0}.tier-rules>div:nth-child(-n+3){border-bottom:1px solid rgba(255,255,255,.06)}.tier-transition-kpis{grid-template-columns:repeat(3,1fr)}.tier-transition-kpis>div:nth-child(3){border-right:0}.tier-transition-kpis>div:nth-child(-n+3){border-bottom:1px solid rgba(255,255,255,.06)}.tier-transition-layout{grid-template-columns:1fr}.tier-matrix-card{border-right:0;border-bottom:1px solid rgba(255,255,255,.065)}}
-      @media(max-width:560px){.efficiency-trend-head{padding:20px 17px}.efficiency-latest{grid-template-columns:1fr}.efficiency-trend-chart{height:350px;padding:8px 0 18px}.efficiency-trend-copy>footer{grid-template-columns:1fr;padding:11px 17px}.efficiency-trend-copy>footer em{grid-column:auto}.tier-transition-head{padding:23px 17px 18px}.tier-transition-head h2{font-size:25px}.tier-transition-head label{min-width:0;width:100%}.tier-rules{grid-template-columns:1fr 1fr}.tier-rules>div{border-bottom:1px solid rgba(255,255,255,.06)}.tier-rules>div:nth-child(odd){border-right:1px solid rgba(255,255,255,.06)}.tier-rules>div:nth-child(even){border-right:0}.tier-rules>div:last-child{grid-column:1/-1;border-bottom:0}.tier-monthly-chart{height:340px;padding-left:0;padding-right:0}.tier-transition-kpis{grid-template-columns:1fr 1fr}.tier-transition-kpis>div{border-bottom:1px solid rgba(255,255,255,.06)!important}.tier-transition-kpis>div:nth-child(odd){border-right:1px solid rgba(255,255,255,.06)!important}.tier-transition-kpis>div:nth-child(even){border-right:0!important}.tier-transition-kpis>div:last-child{grid-column:1/-1;border-bottom:0!important}.tier-matrix-card>header,.tier-flow-card>header{display:grid}.tier-matrix-card header small,.tier-flow-card header small{text-align:left}.tier-matrix-scroll{padding:9px}.tier-transition-section>footer{grid-template-columns:1fr;padding:12px 16px}.tier-transition-section>footer b{grid-column:auto}}
+      @media(max-width:900px){.efficiency-trend-head,.tier-transition-head,.lag-forecast-head{display:grid}.efficiency-latest{min-width:0;width:100%}.lag-model-pill{min-width:0;width:max-content}.lag-answer-grid,.lag-forecast-summary{grid-template-columns:1fr 1fr}.lag-answer:nth-child(2),.lag-forecast-summary>div:nth-child(2){border-right:0}.lag-answer:nth-child(-n+2),.lag-forecast-summary>div:nth-child(-n+2){border-bottom:1px solid rgba(255,255,255,.06)}.lag-chart-grid,.lag-pattern-grid{grid-template-columns:1fr}.lag-chart-grid>.lag-chart-card:first-child,.cohort-card{border-right:0;border-bottom:1px solid rgba(255,255,255,.07)}.tier-rules{grid-template-columns:repeat(3,1fr)}.tier-rules>div:nth-child(3){border-right:0}.tier-rules>div:nth-child(-n+3){border-bottom:1px solid rgba(255,255,255,.06)}.tier-transition-kpis{grid-template-columns:repeat(3,1fr)}.tier-transition-kpis>div:nth-child(3){border-right:0}.tier-transition-kpis>div:nth-child(-n+3){border-bottom:1px solid rgba(255,255,255,.06)}.tier-transition-layout{grid-template-columns:1fr}.tier-matrix-card{border-right:0;border-bottom:1px solid rgba(255,255,255,.065)}}
+      @media(max-width:560px){.efficiency-trend-head{padding:20px 17px}.efficiency-latest{grid-template-columns:1fr}.efficiency-trend-chart{height:350px;padding:8px 0 18px}.efficiency-trend-copy>footer{grid-template-columns:1fr;padding:11px 17px}.efficiency-trend-copy>footer em{grid-column:auto}.lag-forecast-head{padding:23px 17px 18px}.lag-forecast-head h2{font-size:25px}.lag-answer-grid,.lag-forecast-summary{grid-template-columns:1fr}.lag-answer,.lag-forecast-summary>div{border-right:0!important;border-bottom:1px solid rgba(255,255,255,.06)!important;padding:17px}.lag-answer:last-child,.lag-forecast-summary>div:last-child{border-bottom:0!important}.lag-chart-title{display:grid;padding:17px 16px 7px}.lag-chart-title>small{text-align:left}.lag-forecast-chart{height:340px;padding-left:0;padding-right:0}.lag-small-chart,.cohort-chart{height:330px;padding-left:0;padding-right:0}.drawdown-card{padding:19px 16px}.drawdown-stats{grid-template-columns:1fr}.drawdown-stats>div{border-right:0!important;border-bottom:1px solid rgba(255,255,255,.06)!important}.drawdown-stats>div:last-child{border-bottom:0!important}.lag-method-note{margin:13px 12px 15px}.tier-transition-head{padding:23px 17px 18px}.tier-transition-head h2{font-size:25px}.tier-transition-head label{min-width:0;width:100%}.tier-rules{grid-template-columns:1fr 1fr}.tier-rules>div{border-bottom:1px solid rgba(255,255,255,.06)}.tier-rules>div:nth-child(odd){border-right:1px solid rgba(255,255,255,.06)}.tier-rules>div:nth-child(even){border-right:0}.tier-rules>div:last-child{grid-column:1/-1;border-bottom:0}.tier-monthly-chart{height:340px;padding-left:0;padding-right:0}.tier-transition-kpis{grid-template-columns:1fr 1fr}.tier-transition-kpis>div{border-bottom:1px solid rgba(255,255,255,.06)!important}.tier-transition-kpis>div:nth-child(odd){border-right:1px solid rgba(255,255,255,.06)!important}.tier-transition-kpis>div:nth-child(even){border-right:0!important}.tier-transition-kpis>div:last-child{grid-column:1/-1;border-bottom:0!important}.tier-matrix-card>header,.tier-flow-card>header{display:grid}.tier-matrix-card header small,.tier-flow-card header small{text-align:left}.tier-matrix-scroll{padding:9px}.tier-transition-section>footer{grid-template-columns:1fr;padding:12px 16px}.tier-transition-section>footer b{grid-column:auto}}
     `}</style>
   </main>
 }

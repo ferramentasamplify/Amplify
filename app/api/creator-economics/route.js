@@ -7,6 +7,7 @@ export const runtime = 'nodejs'
 const LIVE_PATH = '/var/lib/amplify-hub/creator-economics-live.json'
 const DAILY_LEDGER_MONTHLY = '/root/.openclaw/workspaces/retencao-gabriel/work/tiktok-shop-reports/creator-daily-ledger/monthly'
 const PORTFOLIO_ANALYTICS_PATH = '/root/.openclaw/workspaces/retencao-gabriel/work/tiktok-shop-reports/creator-daily-ledger/meta/creator-portfolio-analytics.json'
+const LAG_FORECAST_ANALYTICS_PATH = '/root/.openclaw/workspaces/retencao-gabriel/work/tiktok-shop-reports/creator-daily-ledger/meta/creator-lag-forecast-analytics.json'
 const META_ENV_PATH = '/root/.openclaw/workspaces/analista-trafego/.env'
 const META_API_VERSION = 'v19.0'
 const metaCache = new Map()
@@ -295,6 +296,25 @@ async function readPortfolioAnalytics(from, to) {
     monthly,
   }
 }
+async function readLagForecastAnalytics() {
+  let payload
+  try {
+    payload = JSON.parse(await readFile(LAG_FORECAST_ANALYTICS_PATH, 'utf8'))
+  } catch (error) {
+    if (error?.code === 'ENOENT') return null
+    throw error
+  }
+  if (payload.schemaVersion !== 1 || !Array.isArray(payload.maturity?.points) || !Array.isArray(payload.maturity?.monthlyCohorts) || !Array.isArray(payload.lagEffect?.points) || !Array.isArray(payload.forecast?.series)) {
+    throw new Error('analytics de efeito e previsao invalidos')
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(payload.range?.from || '') || !/^\d{4}-\d{2}-\d{2}$/.test(payload.range?.to || '') || payload.range.days < 90) {
+    throw new Error('cobertura invalida nos analytics de efeito e previsao')
+  }
+  if (!Number.isFinite(payload.forecast.forecastGmv) || !Number.isFinite(payload.forecast.lowGmv) || !Number.isFinite(payload.forecast.highGmv) || payload.forecast.lowGmv > payload.forecast.forecastGmv || payload.forecast.forecastGmv > payload.forecast.highGmv) {
+    throw new Error('previsao de GMV invalida')
+  }
+  return payload
+}
 function metaResultValue(row) {
   const results = Array.isArray(row.results) ? row.results : []
   const resultValues = results.flatMap((result) => Array.isArray(result.values) ? result.values : [])
@@ -460,10 +480,11 @@ export async function GET(request) {
     const limit = Math.min(250, Math.max(25, Number(url.searchParams.get('limit')) || 100))
     const sort = url.searchParams.get('sort') || 'revenue'
     const monthKeys = monthsBetween(from, to)
-    const [affiliationDaily, portfolioAnalytics, canonicalCreatorMonths] = await Promise.all([
+    const [affiliationDaily, portfolioAnalytics, canonicalCreatorMonths, creatorLagAnalytics] = await Promise.all([
       readDailyAffiliation(from, to),
       readPortfolioAnalytics(from, to),
       readCanonicalCreatorMonths(monthKeys),
+      readLagForecastAnalytics(),
     ])
     const creatorTierAnalytics = buildCreatorTierAnalytics(canonicalCreatorMonths, monthKeys)
 
@@ -660,6 +681,7 @@ export async function GET(request) {
       affiliationDaily,
       portfolioAnalytics,
       creatorTierAnalytics,
+      creatorLagAnalytics,
       profitability,
       summary: {
         activeCreators: filtered.length,
