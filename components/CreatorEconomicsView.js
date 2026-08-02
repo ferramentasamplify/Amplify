@@ -283,12 +283,11 @@ export default function CreatorEconomicsView() {
                 <CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} />
                 <XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#5E6678" tick={{ fontSize: 10 }} minTickGap={32} />
                 <YAxis yAxisId="affiliated" stroke="#766F91" tick={{ fontSize: 10 }} width={52} domain={["dataMin - 40", "dataMax + 40"]} />
-                <YAxis yAxisId="gmvCreators" orientation="right" stroke="#3D7180" tick={{ fontSize: 10 }} width={42} />
                 <YAxis yAxisId="dailyGmv" orientation="right" stroke="#A5783A" tickFormatter={compactMoney} tick={{ fontSize: 10 }} width={70} />
                 <Tooltip content={<DailyGmvTooltip />} />
                 <Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} />
                 <Area yAxisId="affiliated" type="monotone" dataKey="affiliatedCreators" name="Agenciados no dia" stroke="#A99BFF" strokeWidth={3} fill="url(#affiliationGmvFill)" dot={false} activeDot={{ r: 5, strokeWidth: 0 }} />
-                <Line yAxisId="gmvCreators" type="monotone" dataKey="gmvCreators" name="Com GMV no dia" stroke="#54D8E8" strokeWidth={2} strokeDasharray="5 5" dot={false} />
+                <Line yAxisId="affiliated" type="monotone" dataKey="gmvCreators" name="Com GMV no dia" stroke="#54D8E8" strokeWidth={2} strokeDasharray="5 5" dot={false} />
                 <Line yAxisId="dailyGmv" type="monotone" dataKey="dailyGmv" name="GMV diario" stroke="#F6B84B" strokeWidth={2.6} dot={false} activeDot={{ r: 4, strokeWidth: 0 }} />
               </ComposedChart>
             </ResponsiveContainer>
