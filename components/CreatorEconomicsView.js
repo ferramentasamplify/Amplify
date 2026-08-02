@@ -2,7 +2,7 @@
 /* eslint-disable react-hooks/set-state-in-effect -- loading state is reset when the request identity changes */
 
 import { useEffect, useMemo, useState } from "react"
-import { Area, Bar, CartesianGrid, ComposedChart, Legend, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
+import { Area, Bar, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 
 const money = (value) => Number(value || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 2 })
 const compactMoney = (value) => new Intl.NumberFormat("pt-BR", { notation: "compact", style: "currency", currency: "BRL", maximumFractionDigits: 1 }).format(Number(value || 0))
@@ -261,7 +261,7 @@ export default function CreatorEconomicsView() {
                 <ComposedChart data={dailyData} margin={{ top: 18, right: 8, left: -10, bottom: 0 }}>
                   <defs><linearGradient id="affiliationFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#A99BFF" stopOpacity=".32" /><stop offset="100%" stopColor="#A99BFF" stopOpacity=".01" /></linearGradient></defs>
                   <CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} />
-                  {weekendDates.map((weekendDate) => <ReferenceLine key={`affiliation-weekend-${weekendDate}`} x={weekendDate} stroke="rgba(173,181,197,.18)" strokeWidth={0.8} />)}
+                  <CartesianGrid horizontal={false} stroke="rgba(173,181,197,.18)" strokeWidth={0.8} verticalCoordinatesGenerator={({ xAxis }) => weekendDates.map((weekendDate) => xAxis.scale(weekendDate)).filter(Number.isFinite)} />
                   <XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#5E6678" tick={{ fontSize: 10 }} minTickGap={32} />
                   <YAxis yAxisId="affiliated" stroke="#766F91" tick={{ fontSize: 10 }} width={54} domain={["dataMin - 40", "dataMax + 40"]} />
                   <YAxis yAxisId="gmv" orientation="right" stroke="#3D7180" tick={{ fontSize: 10 }} width={46} />
@@ -286,7 +286,7 @@ export default function CreatorEconomicsView() {
               <ComposedChart data={dailyData} margin={{ top: 20, right: 8, left: -8, bottom: 2 }}>
                 <defs><linearGradient id="affiliationGmvFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#A99BFF" stopOpacity=".27" /><stop offset="100%" stopColor="#A99BFF" stopOpacity=".01" /></linearGradient></defs>
                 <CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} />
-                {weekendDates.map((weekendDate) => <ReferenceLine key={`daily-weekend-${weekendDate}`} x={weekendDate} stroke="rgba(173,181,197,.18)" strokeWidth={0.8} />)}
+                <CartesianGrid horizontal={false} stroke="rgba(173,181,197,.18)" strokeWidth={0.8} verticalCoordinatesGenerator={({ xAxis }) => weekendDates.map((weekendDate) => xAxis.scale(weekendDate)).filter(Number.isFinite)} />
                 <XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#5E6678" tick={{ fontSize: 10 }} minTickGap={32} />
                 <YAxis yAxisId="affiliated" stroke="#766F91" tick={{ fontSize: 10 }} width={52} domain={["dataMin - 40", "dataMax + 40"]} />
                 <YAxis yAxisId="dailyGmv" orientation="right" stroke="#A5783A" tickFormatter={compactMoney} tick={{ fontSize: 10 }} width={70} />
@@ -311,7 +311,7 @@ export default function CreatorEconomicsView() {
               <ComposedChart data={dailyData} margin={{ top: 20, right: 8, left: -8, bottom: 2 }}>
                 <defs><linearGradient id="affiliationGmvMonthFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#A99BFF" stopOpacity=".27" /><stop offset="100%" stopColor="#A99BFF" stopOpacity=".01" /></linearGradient></defs>
                 <CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} />
-                {weekendDates.map((weekendDate) => <ReferenceLine key={`month-weekend-${weekendDate}`} x={weekendDate} stroke="rgba(173,181,197,.18)" strokeWidth={0.8} />)}
+                <CartesianGrid horizontal={false} stroke="rgba(173,181,197,.18)" strokeWidth={0.8} verticalCoordinatesGenerator={({ xAxis }) => weekendDates.map((weekendDate) => xAxis.scale(weekendDate)).filter(Number.isFinite)} />
                 <XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#5E6678" tick={{ fontSize: 10 }} minTickGap={32} />
                 <YAxis yAxisId="affiliated" stroke="#766F91" tick={{ fontSize: 10 }} width={52} domain={["dataMin - 40", "dataMax + 40"]} />
                 <YAxis yAxisId="dailyGmv" orientation="right" stroke="#A5783A" tickFormatter={compactMoney} tick={{ fontSize: 10 }} width={70} />
@@ -336,7 +336,7 @@ export default function CreatorEconomicsView() {
               <ComposedChart data={dailyData} margin={{ top: 20, right: 8, left: -8, bottom: 2 }}>
                 <defs><linearGradient id="affiliationGmvRollingFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#A99BFF" stopOpacity=".27" /><stop offset="100%" stopColor="#A99BFF" stopOpacity=".01" /></linearGradient></defs>
                 <CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} />
-                {weekendDates.map((weekendDate) => <ReferenceLine key={`rolling-weekend-${weekendDate}`} x={weekendDate} stroke="rgba(173,181,197,.18)" strokeWidth={0.8} />)}
+                <CartesianGrid horizontal={false} stroke="rgba(173,181,197,.18)" strokeWidth={0.8} verticalCoordinatesGenerator={({ xAxis }) => weekendDates.map((weekendDate) => xAxis.scale(weekendDate)).filter(Number.isFinite)} />
                 <XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#5E6678" tick={{ fontSize: 10 }} minTickGap={32} />
                 <YAxis yAxisId="affiliated" stroke="#766F91" tick={{ fontSize: 10 }} width={52} domain={["dataMin - 40", "dataMax + 40"]} />
                 <YAxis yAxisId="dailyGmv" orientation="right" stroke="#A5783A" tickFormatter={compactMoney} tick={{ fontSize: 10 }} width={70} />
