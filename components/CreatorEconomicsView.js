@@ -453,6 +453,26 @@ export default function CreatorEconomicsView() {
           <footer><span><b>Novos:</b> apareceu hoje e nao estava no relatorio anterior.</span><span><b>Desvinculados observados:</b> estava ontem e nao apareceu hoje.</span><em>Leitura inferida pela presenca diaria; nao e um evento formal de status do Partner Center.</em></footer>
         </section>
 
+        <section className="affiliation-movement-copy affiliation-flow-only">
+          <header className="affiliation-movement-head">
+            <div><span className="affiliation-kicker">Entradas x saidas</span><h2>Novos agenciados e desvinculados por dia</h2><p>Duas series de contagem, no mesmo eixo Y e exatamente na mesma escala.</p></div>
+          </header>
+          <div className="affiliation-movement-chart">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 1240, height: 390 }}>
+              <ComposedChart data={movementData} margin={{ top: 20, right: 12, left: -4, bottom: 2 }}>
+                <CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} />
+                <XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#5E6678" tick={{ fontSize: 10 }} minTickGap={32} />
+                <YAxis allowDecimals={false} stroke="#6B7383" tick={{ fontSize: 10 }} width={52} domain={[0, "dataMax + 10"]} />
+                <Tooltip content={<AffiliationMovementTooltip />} />
+                <Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} />
+                <Line type="monotone" dataKey="firstAppearances" name="Novos agenciados" stroke="#47D7A0" strokeWidth={2.8} dot={false} connectNulls={false} />
+                <Line type="monotone" dataKey="exits" name="Desvinculados observados" stroke="#FF647C" strokeWidth={2.8} dot={false} connectNulls={false} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+          <footer><span><b>Novos agenciados:</b> primeira aparicao observada do creator no ledger.</span><span><b>Desvinculados:</b> presente no dia anterior e ausente no dia atual.</span><em>As duas linhas usam a mesma unidade e o mesmo eixo.</em></footer>
+        </section>
+
         <section className="profitability-section">
           <header className="profitability-head">
             <div><span className="profit-kicker">Custos e lucratividade</span><h2>Quanto a operacao deixa depois do que ja conhecemos</h2><p>Receita diaria da Amplify contra custos comprovados. A cobertura cresce conforme novas fontes de custo forem cadastradas.</p></div>
