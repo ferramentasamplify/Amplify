@@ -66,7 +66,7 @@ async function readDailyAffiliation(from, to) {
   }))).flat().filter((row) => row.day >= `${from}-01` && row.day <= lastDay(to)).sort((a, b) => a.day.localeCompare(b.day))
   if (!rows.length) throw new Error(`ledger diario sem dados entre ${from} e ${to}`)
   for (const row of rows) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(row.day || '') || !Number.isInteger(row.active_creators) || row.active_creators <= 0 || row.downloaded_count !== row.active_creators || !Number.isInteger(row.positive_gmv_creators_month_to_date) || row.positive_gmv_creators_month_to_date < 0 || !Number.isInteger(row.positive_gmv_creators_last_30_days) || row.positive_gmv_creators_last_30_days < 0 || !Number.isFinite(row.gmv_total) || !Number.isFinite(row.gmv_average_last_7_days) || !Number.isFinite(row.gmv_total_last_30_days) || !Number.isFinite(row.estimated_creator_commission)) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(row.day || '') || !Number.isInteger(row.active_creators) || row.active_creators <= 0 || row.downloaded_count !== row.active_creators || !Number.isInteger(row.positive_gmv_creators_month_to_date) || row.positive_gmv_creators_month_to_date < 0 || !Number.isInteger(row.positive_gmv_creators_last_30_days) || row.positive_gmv_creators_last_30_days < 0 || !Number.isFinite(row.gmv_total) || !Number.isFinite(row.gmv_average_last_7_days) || !Number.isFinite(row.gmv_total_last_30_days) || !Number.isInteger(row.gmv_80pct_creator_count_last_30_days) || row.gmv_80pct_creator_count_last_30_days < 0 || !Number.isFinite(row.gmv_80pct_creator_share_of_active_percent_last_30_days) || row.gmv_80pct_creator_share_of_active_percent_last_30_days < 0 || row.gmv_80pct_creator_share_of_active_percent_last_30_days > 100 || !Number.isFinite(row.estimated_creator_commission)) {
       throw new Error(`linha diaria invalida no ledger: ${row.day || 'sem data'}`)
     }
   }
@@ -83,6 +83,8 @@ async function readDailyAffiliation(from, to) {
     dailyGmv: row.gmv_total,
     gmvAverage7Days: row.gmv_average_last_7_days,
     gmvTotal30Days: row.gmv_total_last_30_days,
+    gmv80CreatorCount30Days: row.gmv_80pct_creator_count_last_30_days,
+    gmv80CreatorShareActivePercent30Days: row.gmv_80pct_creator_share_of_active_percent_last_30_days,
     dailyEstimatedCreatorCommission: row.estimated_creator_commission,
     dailyAmplifyRevenue: round(row.estimated_creator_commission * 0.10),
     complete: row.downloaded_count === row.active_creators,

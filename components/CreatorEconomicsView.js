@@ -2,7 +2,7 @@
 /* eslint-disable react-hooks/set-state-in-effect -- loading state is reset when the request identity changes */
 
 import { useEffect, useMemo, useState } from "react"
-import { Area, Bar, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
+import { Area, Bar, CartesianGrid, ComposedChart, Legend, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 
 const money = (value) => Number(value || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 2 })
 const compactMoney = (value) => new Intl.NumberFormat("pt-BR", { notation: "compact", style: "currency", currency: "BRL", maximumFractionDigits: 1 }).format(Number(value || 0))
@@ -35,6 +35,16 @@ function DailyTooltip({ active, payload, label }) {
 function DailyGmvTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null
   return <div className="chart-tip"><strong>{date(label)}</strong>{payload.filter((item) => item.value != null).map((item) => <div key={item.dataKey}><i style={{ background: item.color }} /><span>{item.name}</span><b>{["dailyGmv", "gmvAverage7Days", "gmvTotal30Days"].includes(item.dataKey) ? money(item.value) : integer(item.value)}</b></div>)}</div>
+}
+
+function ConcentrationTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null
+  return <div className="chart-tip"><strong>{date(label)}</strong>{payload.filter((item) => item.value != null).map((item) => <div key={item.dataKey}><i style={{ background: item.color }} /><span>{item.name}</span><b>{item.dataKey === "gmv80CreatorShareActivePercent30Days" ? percent(item.value) : integer(item.value)}</b></div>)}</div>
+}
+
+function FlowAnalysisTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null
+  return <div className="chart-tip"><strong>{date(label)}</strong>{payload.filter((item) => item.value != null).map((item) => <div key={item.dataKey}><i style={{ background: item.color }} /><span>{item.name}</span><b>{item.dataKey.endsWith("Average7Days") ? Number(item.value).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : signedInteger(item.value)}</b></div>)}</div>
 }
 
 function AffiliationMovementTooltip({ active, payload, label }) {
@@ -194,6 +204,26 @@ export default function CreatorEconomicsView() {
   }, [data])
   const matureMonthlyCohorts = (maturity.monthlyCohorts || []).filter((item) => item.complete)
   const movementData = portfolio.daily || []
+  const flowAnalysisData = useMemo(() => {
+    const rows = data?.portfolioAnalytics?.daily || []
+    return rows.map((item, index) => {
+      const window7 = rows.slice(Math.max(0, index - 6), index + 1)
+      const window30 = rows.slice(Math.max(0, index - 29), index + 1)
+      const entries7 = window7.filter((row) => row.firstAppearances != null).map((row) => Number(row.firstAppearances))
+      const exits7 = window7.filter((row) => row.exits != null).map((row) => Number(row.exits))
+      const entries30 = window30.reduce((total, row) => total + Number(row.additions || 0), 0)
+      const exits30 = window30.reduce((total, row) => total + Number(row.exits || 0), 0)
+      return {
+        date: item.date,
+        entriesAverage7Days: entries7.length ? entries7.reduce((total, value) => total + value, 0) / entries7.length : null,
+        exitsAverage7Days: exits7.length ? exits7.reduce((total, value) => total + value, 0) / exits7.length : null,
+        entriesTotal30Days: entries30,
+        exitsTotal30Days: exits30,
+        netTotal30Days: entries30 - exits30,
+      }
+    })
+  }, [data])
+  const latestFlowAnalysis = flowAnalysisData.at(-1) || {}
   const movementChartData = movementWindow === "all" ? movementData : movementData.slice(-Number(movementWindow))
   const latestMovement = movementData.at(-1) || {}
   const selectedPortfolioMonth = portfolio.monthly?.find((item) => item.month === portfolioMonth) || portfolio.monthly?.at(-1) || {}
@@ -399,6 +429,31 @@ export default function CreatorEconomicsView() {
             </ResponsiveContainer>
           </div>
           <footer><span><b>GMV acumulado 30d</b> = soma do GMV diario da data e dos 29 dias anteriores.</span><em>Usa a mesma janela da serie de creators com GMV.</em></footer>
+        </section>
+
+        <section className="affiliation-gmv-copy affiliation-gmv-concentration-copy">
+          <header className="affiliation-gmv-head">
+            <div><span className="affiliation-kicker">Concentracao · Pareto movel</span><h2>Qual percentual da base gera 80% do GMV</h2><p>Para cada data, ordena a carteira ativa pelo GMV acumulado nos ultimos 30 dias e encontra o menor grupo que concentra 80% do valor.</p></div>
+            <div className="daily-gmv-latest"><span>Base que gera 80% do GMV ate {date(affiliation.latest?.date)}</span><strong>{percent(affiliation.latest?.gmv80CreatorShareActivePercent30Days)}</strong><small>{integer(affiliation.latest?.gmv80CreatorCount30Days)} creators da carteira ativa</small></div>
+          </header>
+          <div className="affiliation-gmv-chart">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 1240, height: 390 }}>
+              <ComposedChart data={dailyData} margin={{ top: 20, right: 8, left: -8, bottom: 2 }}>
+                <defs><linearGradient id="affiliationGmvConcentrationFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#A99BFF" stopOpacity=".27" /><stop offset="100%" stopColor="#A99BFF" stopOpacity=".01" /></linearGradient></defs>
+                <CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} />
+                <CartesianGrid horizontal={false} stroke="rgba(173,181,197,.18)" strokeWidth={0.8} verticalCoordinatesGenerator={({ offset }) => weekendIndexes.map((index) => offset.left + index * offset.width / Math.max(1, dailyData.length - 1))} />
+                <XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#5E6678" tick={{ fontSize: 10 }} minTickGap={32} />
+                <YAxis yAxisId="creators" stroke="#766F91" tick={{ fontSize: 10 }} width={52} domain={[0, "dataMax + 40"]} />
+                <YAxis yAxisId="share" orientation="right" stroke="#A5783A" tickFormatter={percent} tick={{ fontSize: 10 }} width={58} domain={[0, "dataMax + 1"]} />
+                <Tooltip content={<ConcentrationTooltip />} />
+                <Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} />
+                <Area yAxisId="creators" type="monotone" dataKey="affiliatedCreators" name="Agenciados no dia" stroke="#A99BFF" strokeWidth={3} fill="url(#affiliationGmvConcentrationFill)" dot={false} activeDot={{ r: 5, strokeWidth: 0 }} />
+                <Line yAxisId="creators" type="monotone" dataKey="gmv80CreatorCount30Days" name="Creators que geram 80% do GMV 30d" stroke="#54D8E8" strokeWidth={2.4} dot={false} />
+                <Line yAxisId="share" type="monotone" dataKey="gmv80CreatorShareActivePercent30Days" name="% da base que gera 80% do GMV" stroke="#F6B84B" strokeWidth={2.8} dot={false} activeDot={{ r: 4, strokeWidth: 0 }} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+          <footer><span><b>Grupo dos 80%:</b> menor numero de creators ativos cuja soma do GMV positivo em D-29 a D atinge 80% do GMV da carteira ativa.</span><em>Percentual = creators do grupo ÷ agenciados no dia. Nos primeiros 29 dias, usa os dias disponiveis.</em></footer>
         </section>
 
         <section className="efficiency-trend-copy">
@@ -635,6 +690,54 @@ export default function CreatorEconomicsView() {
             </ResponsiveContainer>
           </div>
           <footer><span><b>Novos agenciados:</b> primeira aparicao observada do creator no ledger.</span><span><b>Desvinculados:</b> presente no dia anterior e ausente no dia atual.</span><em>As duas linhas usam a mesma unidade e o mesmo eixo.</em></footer>
+        </section>
+
+        <section className="affiliation-movement-copy affiliation-flow-only affiliation-flow-average7-copy">
+          <header className="affiliation-movement-head">
+            <div><span className="affiliation-kicker">Ritmo real · media movel</span><h2>Media de entradas e saidas dos ultimos 7 dias</h2><p>Suaviza os picos diarios e deixa claro se a velocidade de aquisicao esta acima ou abaixo da velocidade de saida.</p></div>
+            <div className="daily-movement-latest">
+              <div><span>Entradas · media 7d</span><strong className="positive">{Number(latestFlowAnalysis.entriesAverage7Days || 0).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}/dia</strong></div>
+              <div><span>Saidas · media 7d</span><strong className="negative">{Number(latestFlowAnalysis.exitsAverage7Days || 0).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}/dia</strong></div>
+            </div>
+          </header>
+          <div className="affiliation-movement-chart">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 1240, height: 390 }}>
+              <ComposedChart data={flowAnalysisData} margin={{ top: 20, right: 12, left: -4, bottom: 2 }}>
+                <CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} />
+                <CartesianGrid horizontal={false} stroke="rgba(173,181,197,.18)" strokeWidth={0.8} verticalCoordinatesGenerator={({ offset }) => weekendIndexes.map((index) => offset.left + index * offset.width / Math.max(1, flowAnalysisData.length - 1))} />
+                <XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#5E6678" tick={{ fontSize: 10 }} minTickGap={32} />
+                <YAxis allowDecimals={false} stroke="#6B7383" tick={{ fontSize: 10 }} width={52} domain={[0, "auto"]} />
+                <Tooltip content={<FlowAnalysisTooltip />} />
+                <Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} />
+                <Line type="monotone" dataKey="entriesAverage7Days" name="Entradas · media movel 7d" stroke="#47D7A0" strokeWidth={3} dot={false} connectNulls={false} />
+                <Line type="monotone" dataKey="exitsAverage7Days" name="Saidas · media movel 7d" stroke="#FF647C" strokeWidth={3} dot={false} connectNulls={false} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+          <footer><span><b>Media 7d:</b> media diaria da data e dos 6 dias anteriores.</span><span><b>Entradas:</b> somente primeira aparicao; retornos nao entram.</span><em>Linhas de sabado e domingo preservadas.</em></footer>
+        </section>
+
+        <section className="affiliation-movement-copy affiliation-flow-only affiliation-flow-net30-copy">
+          <header className="affiliation-movement-head">
+            <div><span className="affiliation-kicker">Expansao liquida · janela movel</span><h2>Saldo acumulado da carteira nos ultimos 30 dias</h2><p>Uma unica linha para responder se a carteira ganhou ou perdeu creators no periodo recente, sem ruido diario.</p></div>
+            <div className="daily-gmv-latest"><span>Saldo 30d ate {date(latestFlowAnalysis.date)}</span><strong className={(latestFlowAnalysis.netTotal30Days || 0) >= 0 ? "positive" : "negative"}>{signedInteger(latestFlowAnalysis.netTotal30Days)}</strong><small>{integer(latestFlowAnalysis.entriesTotal30Days)} entradas − {integer(latestFlowAnalysis.exitsTotal30Days)} saidas</small></div>
+          </header>
+          <div className="affiliation-movement-chart">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 1240, height: 390 }}>
+              <ComposedChart data={flowAnalysisData} margin={{ top: 20, right: 12, left: -4, bottom: 2 }}>
+                <defs><linearGradient id="affiliationFlowNet30Fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#54D8E8" stopOpacity=".24" /><stop offset="100%" stopColor="#54D8E8" stopOpacity=".01" /></linearGradient></defs>
+                <CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} />
+                <CartesianGrid horizontal={false} stroke="rgba(173,181,197,.18)" strokeWidth={0.8} verticalCoordinatesGenerator={({ offset }) => weekendIndexes.map((index) => offset.left + index * offset.width / Math.max(1, flowAnalysisData.length - 1))} />
+                <XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#5E6678" tick={{ fontSize: 10 }} minTickGap={32} />
+                <YAxis stroke="#6B7383" tick={{ fontSize: 10 }} width={58} domain={["dataMin - 20", "dataMax + 20"]} />
+                <ReferenceLine y={0} stroke="rgba(255,255,255,.48)" strokeDasharray="5 5" />
+                <Tooltip content={<FlowAnalysisTooltip />} />
+                <Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} />
+                <Area type="monotone" dataKey="netTotal30Days" name="Saldo acumulado nos ultimos 30 dias" stroke="#54D8E8" strokeWidth={3} fill="url(#affiliationFlowNet30Fill)" dot={false} activeDot={{ r: 5, strokeWidth: 0 }} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+          <footer><span><b>Saldo 30d:</b> entradas observadas menos saidas observadas entre D-29 e D.</span><span>Acima de zero = expansao; abaixo de zero = contracao.</span><em>Entradas incluem primeira aparicao e retornos, para reconciliar exatamente a variacao do estoque ativo.</em></footer>
         </section>
 
         <section className="profitability-section">
