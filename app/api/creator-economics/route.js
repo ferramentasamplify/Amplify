@@ -66,7 +66,7 @@ async function readDailyAffiliation(from, to) {
   }))).flat().filter((row) => row.day >= `${from}-01` && row.day <= lastDay(to)).sort((a, b) => a.day.localeCompare(b.day))
   if (!rows.length) throw new Error(`ledger diario sem dados entre ${from} e ${to}`)
   for (const row of rows) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(row.day || '') || !Number.isInteger(row.active_creators) || row.active_creators <= 0 || row.downloaded_count !== row.active_creators || !Number.isFinite(row.gmv_total) || !Number.isFinite(row.estimated_creator_commission)) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(row.day || '') || !Number.isInteger(row.active_creators) || row.active_creators <= 0 || row.downloaded_count !== row.active_creators || !Number.isInteger(row.positive_gmv_creators_month_to_date) || row.positive_gmv_creators_month_to_date < 0 || !Number.isFinite(row.gmv_total) || !Number.isFinite(row.estimated_creator_commission)) {
       throw new Error(`linha diaria invalida no ledger: ${row.day || 'sem data'}`)
     }
   }
@@ -78,6 +78,7 @@ async function readDailyAffiliation(from, to) {
     date: row.day,
     affiliatedCreators: row.active_creators,
     gmvCreators: Number(row.positive_gmv_creators) || 0,
+    gmvCreatorsMonthToDate: Number(row.positive_gmv_creators_month_to_date) || 0,
     dailyGmv: row.gmv_total,
     dailyEstimatedCreatorCommission: row.estimated_creator_commission,
     dailyAmplifyRevenue: round(row.estimated_creator_commission * 0.10),

@@ -295,6 +295,30 @@ export default function CreatorEconomicsView() {
           <footer><span>GMV diario = soma de <b>sum_cl_pay_amt</b> no relatorio Criador fechado de cada data.</span><em>Eixo financeiro em R$ separado das contagens.</em></footer>
         </section>
 
+        <section className="affiliation-gmv-copy affiliation-gmv-month-copy">
+          <header className="affiliation-gmv-head">
+            <div><span className="affiliation-kicker">Leitura mensal acumulada</span><h2>Agenciados + creators com GMV no mes</h2><p>Creators unicos que ja tiveram algum GMV no mes ate cada data, sem usar informacao de dias futuros.</p></div>
+            <div className="daily-gmv-latest"><span>Com GMV no mes ate {date(affiliation.latest?.date)}</span><strong>{integer(affiliation.latest?.gmvCreatorsMonthToDate)}</strong><small>creators unicos · acumulado MTD</small></div>
+          </header>
+          <div className="affiliation-gmv-chart">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 1240, height: 390 }}>
+              <ComposedChart data={dailyData} margin={{ top: 20, right: 8, left: -8, bottom: 2 }}>
+                <defs><linearGradient id="affiliationGmvMonthFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#A99BFF" stopOpacity=".27" /><stop offset="100%" stopColor="#A99BFF" stopOpacity=".01" /></linearGradient></defs>
+                <CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} />
+                <XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#5E6678" tick={{ fontSize: 10 }} minTickGap={32} />
+                <YAxis yAxisId="affiliated" stroke="#766F91" tick={{ fontSize: 10 }} width={52} domain={["dataMin - 40", "dataMax + 40"]} />
+                <YAxis yAxisId="dailyGmv" orientation="right" stroke="#A5783A" tickFormatter={compactMoney} tick={{ fontSize: 10 }} width={70} />
+                <Tooltip content={<DailyGmvTooltip />} />
+                <Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} />
+                <Area yAxisId="affiliated" type="monotone" dataKey="affiliatedCreators" name="Agenciados no dia" stroke="#A99BFF" strokeWidth={3} fill="url(#affiliationGmvMonthFill)" dot={false} activeDot={{ r: 5, strokeWidth: 0 }} />
+                <Line yAxisId="affiliated" type="monotone" dataKey="gmvCreatorsMonthToDate" name="Com GMV no mes" stroke="#54D8E8" strokeWidth={2.2} strokeDasharray="5 5" dot={false} />
+                <Line yAxisId="dailyGmv" type="monotone" dataKey="dailyGmv" name="GMV diario" stroke="#F6B84B" strokeWidth={2.6} dot={false} activeDot={{ r: 4, strokeWidth: 0 }} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+          <footer><span><b>Com GMV no mes</b> = creators unicos com algum GMV desde o primeiro dia do mes ate a data; a contagem reinicia a cada mes.</span><em>Eixo financeiro em R$ separado das contagens.</em></footer>
+        </section>
+
         <section className="efficiency-trend-copy">
           <header className="efficiency-trend-head">
             <div><span className="affiliation-kicker">Tendencia da monetizacao</span><h2>Conversao e GMV medio por agenciado</h2><p>Copia analitica do ledger diario. As linhas fortes mostram a media movel de 7 dias; as linhas finas preservam o valor real de cada data.</p></div>
