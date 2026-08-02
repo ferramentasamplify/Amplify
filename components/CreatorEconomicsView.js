@@ -34,7 +34,7 @@ function DailyTooltip({ active, payload, label }) {
 
 function DailyGmvTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null
-  return <div className="chart-tip"><strong>{date(label)}</strong>{payload.filter((item) => item.value != null).map((item) => <div key={item.dataKey}><i style={{ background: item.color }} /><span>{item.name}</span><b>{item.dataKey === "dailyGmv" ? money(item.value) : integer(item.value)}</b></div>)}</div>
+  return <div className="chart-tip"><strong>{date(label)}</strong>{payload.filter((item) => item.value != null).map((item) => <div key={item.dataKey}><i style={{ background: item.color }} /><span>{item.name}</span><b>{["dailyGmv", "gmvAverage7Days", "gmvTotal30Days"].includes(item.dataKey) ? money(item.value) : integer(item.value)}</b></div>)}</div>
 }
 
 function AffiliationMovementTooltip({ active, payload, label }) {
@@ -349,6 +349,56 @@ export default function CreatorEconomicsView() {
             </ResponsiveContainer>
           </div>
           <footer><span><b>Com GMV nos ultimos 30 dias</b> = creators unicos com algum GMV na data e nos 29 dias anteriores. Nos primeiros 29 dias do historico, usa somente os dias disponiveis.</span><em>Eixo financeiro em R$ separado das contagens.</em></footer>
+        </section>
+
+        <section className="affiliation-gmv-copy affiliation-gmv-average7-copy">
+          <header className="affiliation-gmv-head">
+            <div><span className="affiliation-kicker">Fases de GMV · media movel</span><h2>Creators com GMV 30d + GMV medio dos ultimos 7 dias</h2><p>A mesma leitura de carteira, com o ruido diario suavizado para destacar semanas e mudancas persistentes de nivel.</p></div>
+            <div className="daily-gmv-latest"><span>GMV medio 7d ate {date(affiliation.latest?.date)}</span><strong>{money(affiliation.latest?.gmvAverage7Days)}</strong><small>media diaria · data + 6 dias anteriores</small></div>
+          </header>
+          <div className="affiliation-gmv-chart">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 1240, height: 390 }}>
+              <ComposedChart data={dailyData} margin={{ top: 20, right: 8, left: -8, bottom: 2 }}>
+                <defs><linearGradient id="affiliationGmvAverage7Fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#A99BFF" stopOpacity=".27" /><stop offset="100%" stopColor="#A99BFF" stopOpacity=".01" /></linearGradient></defs>
+                <CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} />
+                <CartesianGrid horizontal={false} stroke="rgba(173,181,197,.18)" strokeWidth={0.8} verticalCoordinatesGenerator={({ offset }) => weekendIndexes.map((index) => offset.left + index * offset.width / Math.max(1, dailyData.length - 1))} />
+                <XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#5E6678" tick={{ fontSize: 10 }} minTickGap={32} />
+                <YAxis yAxisId="affiliated" stroke="#766F91" tick={{ fontSize: 10 }} width={52} domain={["dataMin - 40", "dataMax + 40"]} />
+                <YAxis yAxisId="gmvAverage7" orientation="right" stroke="#A5783A" tickFormatter={compactMoney} tick={{ fontSize: 10 }} width={70} />
+                <Tooltip content={<DailyGmvTooltip />} />
+                <Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} />
+                <Area yAxisId="affiliated" type="monotone" dataKey="affiliatedCreators" name="Agenciados no dia" stroke="#A99BFF" strokeWidth={3} fill="url(#affiliationGmvAverage7Fill)" dot={false} activeDot={{ r: 5, strokeWidth: 0 }} />
+                <Line yAxisId="affiliated" type="monotone" dataKey="gmvCreatorsLast30Days" name="Com GMV nos ultimos 30 dias" stroke="#54D8E8" strokeWidth={2.2} dot={false} />
+                <Line yAxisId="gmvAverage7" type="monotone" dataKey="gmvAverage7Days" name="GMV medio dos ultimos 7 dias" stroke="#F6B84B" strokeWidth={2.8} dot={false} activeDot={{ r: 4, strokeWidth: 0 }} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+          <footer><span><b>GMV medio 7d</b> = media do GMV diario da data e dos 6 dias anteriores.</span><em>Mostra fases fortes sem deixar um unico pico dominar a leitura.</em></footer>
+        </section>
+
+        <section className="affiliation-gmv-copy affiliation-gmv-total30-copy">
+          <header className="affiliation-gmv-head">
+            <div><span className="affiliation-kicker">Volume economico · janela movel</span><h2>Creators com GMV 30d + GMV acumulado nos ultimos 30 dias</h2><p>Creators e volume financeiro na mesma janela movel, para comparar expansao da base monetizada com crescimento de GMV.</p></div>
+            <div className="daily-gmv-latest"><span>GMV acumulado 30d ate {date(affiliation.latest?.date)}</span><strong>{money(affiliation.latest?.gmvTotal30Days)}</strong><small>total movel · data + 29 dias anteriores</small></div>
+          </header>
+          <div className="affiliation-gmv-chart">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 1240, height: 390 }}>
+              <ComposedChart data={dailyData} margin={{ top: 20, right: 8, left: -8, bottom: 2 }}>
+                <defs><linearGradient id="affiliationGmvTotal30Fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#A99BFF" stopOpacity=".27" /><stop offset="100%" stopColor="#A99BFF" stopOpacity=".01" /></linearGradient></defs>
+                <CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} />
+                <CartesianGrid horizontal={false} stroke="rgba(173,181,197,.18)" strokeWidth={0.8} verticalCoordinatesGenerator={({ offset }) => weekendIndexes.map((index) => offset.left + index * offset.width / Math.max(1, dailyData.length - 1))} />
+                <XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#5E6678" tick={{ fontSize: 10 }} minTickGap={32} />
+                <YAxis yAxisId="affiliated" stroke="#766F91" tick={{ fontSize: 10 }} width={52} domain={["dataMin - 40", "dataMax + 40"]} />
+                <YAxis yAxisId="gmvTotal30" orientation="right" stroke="#A5783A" tickFormatter={compactMoney} tick={{ fontSize: 10 }} width={70} />
+                <Tooltip content={<DailyGmvTooltip />} />
+                <Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} />
+                <Area yAxisId="affiliated" type="monotone" dataKey="affiliatedCreators" name="Agenciados no dia" stroke="#A99BFF" strokeWidth={3} fill="url(#affiliationGmvTotal30Fill)" dot={false} activeDot={{ r: 5, strokeWidth: 0 }} />
+                <Line yAxisId="affiliated" type="monotone" dataKey="gmvCreatorsLast30Days" name="Com GMV nos ultimos 30 dias" stroke="#54D8E8" strokeWidth={2.2} dot={false} />
+                <Line yAxisId="gmvTotal30" type="monotone" dataKey="gmvTotal30Days" name="GMV acumulado nos ultimos 30 dias" stroke="#F6B84B" strokeWidth={2.8} dot={false} activeDot={{ r: 4, strokeWidth: 0 }} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+          <footer><span><b>GMV acumulado 30d</b> = soma do GMV diario da data e dos 29 dias anteriores.</span><em>Usa a mesma janela da serie de creators com GMV.</em></footer>
         </section>
 
         <section className="efficiency-trend-copy">
