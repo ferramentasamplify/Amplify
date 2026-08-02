@@ -60,24 +60,29 @@ function BaseHealthTooltip({ active, payload, label, mode = "percent" }) {
   return <div className="chart-tip"><strong>{date(label)}</strong>{payload.filter((item) => item.value != null).map((item) => <div key={item.dataKey}><i style={{ background: item.color }} /><span>{item.name}</span><b>{mode === "money" ? money(item.value) : percent(item.value)}</b></div>)}</div>
 }
 
-function ForecastTooltip({ active, payload, label }) {
+function ActivationMilestoneTooltip({ active, payload }) {
   if (!active || !payload?.length) return null
-  return <div className="chart-tip"><strong>{date(label)}</strong>{payload.filter((item) => item.value != null && item.dataKey !== "forecastBand").map((item) => <div key={item.dataKey}><i style={{ background: item.color }} /><span>{item.name}</span><b>{money(item.value)}</b></div>)}</div>
+  const item = payload[0].payload
+  return <div className="chart-tip"><strong>{item.label}</strong><div><i style={{ background: "#54D8E8" }} /><span>Creators que ja geraram GMV</span><b>{percent(item.activationPercent)}</b></div><div><i style={{ background: "#727B8C" }} /><span>Base elegivel</span><b>{integer(item.eligibleCreators)}</b></div></div>
 }
 
-function MaturityTooltip({ active, payload, label }) {
+function ActivationSpeedTooltip({ active, payload }) {
   if (!active || !payload?.length) return null
-  return <div className="chart-tip"><strong>D+{integer(label)}</strong>{payload.filter((item) => item.value != null).map((item) => <div key={item.dataKey}><i style={{ background: item.color }} /><span>{item.name}</span><b>{item.dataKey === "activationPercent" ? percent(item.value) : money(item.value)}</b></div>)}</div>
+  const item = payload[0].payload
+  return <div className="chart-tip"><strong>{item.label}</strong><div><i style={{ background: "#A99BFF" }} /><span>Tempo ate o primeiro GMV</span><b>{integer(item.days)} dias</b></div></div>
 }
 
-function LagTooltip({ active, payload, label }) {
+function CohortQualityTooltip({ active, payload, label, mode = "activation" }) {
   if (!active || !payload?.length) return null
-  return <div className="chart-tip"><strong>{integer(label)} dias depois</strong>{payload.filter((item) => item.value != null).map((item) => <div key={item.dataKey}><i style={{ background: item.color }} /><span>{item.name}</span><b>{Number(item.value).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}</b></div>)}</div>
+  const item = payload[0].payload
+  return <div className="chart-tip"><strong>{monthLabel(label)}</strong><div><i style={{ background: mode === "activation" ? "#54D8E8" : "#F6B84B" }} /><span>{mode === "activation" ? "Ativaram ate D+30" : "GMV medio por creator em 30d"}</span><b>{mode === "activation" ? percent(item.activation30Percent) : money(item.averageGmv30)}</b></div><div><i style={{ background: "#727B8C" }} /><span>Creators da safra</span><b>{integer(item.matureEntrants)}</b></div>{mode === "gmv" && <div><i style={{ background: "#8B6D3B" }} /><span>GMV mediano</span><b>{money(item.medianGmv30)}</b></div>}</div>
 }
 
-function CohortTooltip({ active, payload, label }) {
+function WeeklyGmvTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null
-  return <div className="chart-tip"><strong>{monthLabel(label)}</strong>{payload.filter((item) => item.value != null).map((item) => <div key={item.dataKey}><i style={{ background: item.color }} /><span>{item.name}</span><b>{item.dataKey === "activation30Percent" ? percent(item.value) : item.dataKey === "matureEntrants" ? integer(item.value) : money(item.value)}</b></div>)}</div>
+  const item = payload.find((entry) => entry.value != null)?.payload
+  if (!item) return null
+  return <div className="chart-tip"><strong>{label}</strong><div><i style={{ background: item.kind === "observado" ? "#54D8E8" : "#A99BFF" }} /><span>GMV {item.kind}</span><b>{money(item.gmv)}</b></div>{item.kind === "previsto" && <div><i style={{ background: "#6E648E" }} /><span>Faixa do modelo</span><b>{compactMoney(item.lowGmv)}–{compactMoney(item.highGmv)}</b></div>}</div>
 }
 
 function MovementTooltip({ active, payload, label }) {
@@ -162,6 +167,8 @@ export default function CreatorEconomicsView() {
   const selectedTierTransition = tierAnalytics.transitions?.find((item) => item.toMonth === tierTransitionMonth) || tierAnalytics.transitions?.at(-1) || {}
   const tierMatrixMax = Math.max(1, ...(selectedTierTransition.matrix || []).flatMap((row) => row.cells.map((cell) => cell.count)))
   const migrationFlows = (selectedTierTransition.flows || []).filter((flow) => flow.from !== flow.to).slice(0, 10)
+  const latestTierMonth = tierAnalytics.monthly?.at(-1) || {}
+  const latestAboveStart = ["silver", "gold", "diamond", "safira"].reduce((total, key) => total + Number(latestTierMonth[key] || 0), 0)
   const baseHealthLatest = baseHealthData.at(-1) || {}
   const lagAnalytics = data?.creatorLagAnalytics || {}
   const portfolioForecast = lagAnalytics.portfolioForecast || {}
@@ -175,18 +182,34 @@ export default function CreatorEconomicsView() {
   const selectedPortfolioFlowSeries = portfolioForecastSeries.filter((item) => item[selectedEntriesKey] != null || item[selectedExitsKey] != null)
   const maturity = lagAnalytics.maturity || {}
   const maturityPoints = maturity.points || []
-  const maturity14 = maturityPoints.find((item) => item.ageDays === 14) || {}
-  const maturity30 = maturityPoints.find((item) => item.ageDays === 30) || {}
-  const maturity60 = maturityPoints.find((item) => item.ageDays === 60) || {}
-  const lagEffect = lagAnalytics.lagEffect || {}
+  const activationMilestones = [0, 7, 14, 30, 60].map((ageDays) => ({ ...(maturityPoints.find((item) => item.ageDays === ageDays) || {}), label: `D+${ageDays}` }))
+  const activationSpeedData = [
+    { label: "50% dos ativados", days: Number(maturity.medianDaysToFirstGmvAmongActivated30 || 0) },
+    { label: "75% dos ativados", days: Number(maturity.p75DaysToFirstGmv || 0) },
+    { label: "90% dos ativados", days: Number(maturity.p90DaysToFirstGmv || 0) },
+  ]
   const stockDrawdown = lagAnalytics.stockDrawdown || {}
   const lagForecast = lagAnalytics.forecast || {}
   const recentCohorts = lagForecast.recentCohorts || {}
-  const forecastData = useMemo(() => {
-    const series = (data?.creatorLagAnalytics?.forecast?.series || []).map((item) => ({ ...item, forecastBand: item.lowGmv == null || item.highGmv == null ? null : [item.lowGmv, item.highGmv] }))
-    const bridgeIndex = series.findLastIndex((item) => item.actualGmv != null)
-    if (bridgeIndex >= 0 && series[bridgeIndex + 1]?.forecastGmv != null) series[bridgeIndex] = { ...series[bridgeIndex], forecastGmv: series[bridgeIndex].actualGmv, forecastBand: [series[bridgeIndex].actualGmv, series[bridgeIndex].actualGmv] }
-    return series
+  const weeklyGmvData = useMemo(() => {
+    const rows = data?.creatorLagAnalytics?.forecast?.series || []
+    const observed = rows.filter((item) => item.actualGmv != null).slice(-28)
+    const predicted = rows.filter((item) => item.actualGmv == null && item.forecastGmv != null).slice(0, 28)
+    const groupWeeks = (values, kind) => Array.from({ length: 4 }, (_, index) => {
+      const week = values.slice(index * 7, index * 7 + 7)
+      if (!week.length) return null
+      const sum = (key) => week.reduce((total, item) => total + Number(item[key] || 0), 0)
+      return {
+        period: `${date(week[0].date).slice(0, 5)}–${date(week.at(-1).date).slice(0, 5)}`,
+        kind,
+        gmv: sum(kind === "observado" ? "actualGmv" : "forecastGmv"),
+        observedGmv: kind === "observado" ? sum("actualGmv") : null,
+        forecastGmv: kind === "previsto" ? sum("forecastGmv") : null,
+        lowGmv: kind === "previsto" ? sum("lowGmv") : null,
+        highGmv: kind === "previsto" ? sum("highGmv") : null,
+      }
+    }).filter(Boolean)
+    return [...groupWeeks(observed, "observado"), ...groupWeeks(predicted, "previsto")]
   }, [data])
   const matureMonthlyCohorts = (maturity.monthlyCohorts || []).filter((item) => item.complete)
   const movementData = portfolio.daily || []
@@ -212,6 +235,8 @@ export default function CreatorEconomicsView() {
   const latestFlowAnalysis = flowAnalysisData.at(-1) || {}
   const movementChartData = movementWindow === "all" ? movementData : movementData.slice(-Number(movementWindow))
   const latestMovement = movementData.at(-1) || {}
+  const selectedReturnsTotal = movementChartData.reduce((total, item) => total + Number(item.returns || 0), 0)
+  const selectedReturnsDailyAverage = movementChartData.length ? selectedReturnsTotal / movementChartData.length : 0
   const selectedPortfolioMonth = portfolio.monthly?.find((item) => item.month === portfolioMonth) || portfolio.monthly?.at(-1) || {}
   const summary = data?.summary || {}
   const paid = data?.paidEconomics || {}
@@ -511,116 +536,52 @@ export default function CreatorEconomicsView() {
           <footer className="portfolio-projection-note"><b>Formula:</b> ativos de amanha = ativos de hoje + media 7d de entradas - (ativos de hoje × taxa diaria de saida 7d). <em>{portfolioForecast.caveat} Retornos nao entram porque o grafico de referencia usa somente primeiras aparicoes.</em></footer>
         </section>}
 
-        {lagAnalytics.schemaVersion === 1 && <section id="lag-forecast" className="lag-forecast-section">
-          <header className="lag-forecast-head">
-            <div><span className="lag-kicker">Efeito do agenciamento + previsao</span><h2>Quando a carteira vira GMV e dinheiro para a Amplify</h2><p>Coortes por primeira aparicao, efeito defasado observado e previsao de 30 dias com erro historico medido.</p></div>
-            <div className="lag-model-pill"><span>Backtest · {integer(lagForecast.backtestOrigins)} janelas</span><strong>erro {percent(lagForecast.backtestWapePercent)}</strong><small>WAPE fora da amostra</small></div>
+        {lagAnalytics.schemaVersion === 1 && <section id="lag-forecast" className="lag-forecast-section lag-simple-section">
+          <header className="lag-simple-head">
+            <div><span className="lag-kicker">Do agenciamento ao GMV</span><h2>O que acontece depois que um creator entra?</h2><p>Leitura direta de ativacao, velocidade, qualidade das safras e GMV esperado. Sem correlacoes tecnicas ou curvas com duas escalas.</p></div>
+            <div className="lag-thesis"><span>Principal gargalo</span><strong>{integer(Math.round(100 - Number(maturity.activation30Percent || 0)))} de cada 100</strong><small>ainda nao geraram GMV ate D+30</small></div>
           </header>
 
-          <div className="lag-answer-grid">
-            <article className="lag-answer main"><span>O efeito demora um mes?</span><strong>Nao e um atraso fixo.</strong><p>Entre os que ativam, a mediana do primeiro GMV e <b>{integer(maturity.medianDaysToFirstGmvAmongActivated30)} dias</b>. O efeito da safra continua acumulando entre D+30 e D+60.</p></article>
-            <article className="lag-answer"><span>Ate D+14</span><strong>{percent(maturity14.activationPercent)}</strong><p>ja geraram algum GMV · receita Amplify media acumulada {money(maturity14.averageCumulativeAmplifyRevenue)}</p></article>
-            <article className="lag-answer"><span>Ate D+30</span><strong>{percent(maturity30.activationPercent)}</strong><p>ja geraram algum GMV · receita Amplify media acumulada {money(maturity30.averageCumulativeAmplifyRevenue)}</p></article>
-            <article className="lag-answer"><span>Ate D+60</span><strong>{percent(maturity60.activationPercent)}</strong><p>ja geraram algum GMV · receita Amplify media acumulada {money(maturity60.averageCumulativeAmplifyRevenue)}</p></article>
+          <div className="lag-simple-grid">
+            <article className="lag-simple-card activation-card">
+              <header><div><span>Conversao acumulada</span><h3>De cada 100 novos, quantos ja geraram GMV?</h3></div><small>{integer(maturity.cohortCreators)} creators analisados</small></header>
+              <div className="lag-simple-chart"><ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 760, height: 340 }}><ComposedChart data={activationMilestones} margin={{ top: 18, right: 12, left: -6, bottom: 2 }}><CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} /><XAxis dataKey="label" stroke="#667083" tick={{ fontSize: 10 }} /><YAxis domain={[0, 100]} tickFormatter={(value) => `${value}%`} stroke="#5E7880" tick={{ fontSize: 10 }} width={48} /><Tooltip content={<ActivationMilestoneTooltip />} /><Bar dataKey="activationPercent" name="Creators com GMV" fill="#54D8E8" radius={[7, 7, 0, 0]} maxBarSize={58} /></ComposedChart></ResponsiveContainer></div>
+              <footer><b>{percent(maturity.activation30Percent)}</b> ativam ate D+30; <em>{percent(100 - Number(maturity.activation30Percent || 0))} permanecem sem GMV.</em></footer>
+            </article>
+
+            <article className="lag-simple-card speed-card">
+              <header><div><span>Velocidade de ativacao</span><h3>Em quantos dias acontece o primeiro GMV?</h3></div><small>entre os que ativam ate D+30</small></header>
+              <div className="lag-simple-chart"><ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 560, height: 340 }}><ComposedChart layout="vertical" data={activationSpeedData} margin={{ top: 22, right: 28, left: 18, bottom: 2 }}><CartesianGrid stroke="rgba(255,255,255,.055)" horizontal={false} /><XAxis type="number" domain={[0, "dataMax + 3"]} tickFormatter={(value) => `${value}d`} stroke="#716A8D" tick={{ fontSize: 10 }} /><YAxis type="category" dataKey="label" width={118} stroke="#6D7688" tick={{ fontSize: 10 }} /><Tooltip content={<ActivationSpeedTooltip />} /><Bar dataKey="days" name="Dias ate o primeiro GMV" fill="#A99BFF" radius={[0, 7, 7, 0]} maxBarSize={34} /></ComposedChart></ResponsiveContainer></div>
+              <footer>A mediana e <b>D+{integer(maturity.medianDaysToFirstGmvAmongActivated30)}</b>; 90% dos que ativam fazem o primeiro GMV ate <em>D+{integer(maturity.p90DaysToFirstGmv)}</em>.</footer>
+            </article>
           </div>
 
-          <div className="lag-forecast-summary">
-            <div><span>Previsao de GMV · proximos 30 dias</span><strong>{compactMoney(lagForecast.forecastGmv)}</strong><small>faixa historica: {compactMoney(lagForecast.lowGmv)} a {compactMoney(lagForecast.highGmv)}</small></div>
-            <div><span>Receita Amplify estimada</span><strong>{compactMoney(lagForecast.forecastAmplifyRevenue)}</strong><small>{compactMoney(lagForecast.lowAmplifyRevenue)} a {compactMoney(lagForecast.highAmplifyRevenue)} · nao e lucro</small></div>
-            <div><span>Entraram nos ultimos 30 dias</span><strong>{integer(recentCohorts.entrantsLast30Days)}</strong><small>contribuicao esperada nos proximos 30d: {compactMoney(recentCohorts.expectedNext30Gmv)} de GMV</small></div>
-            <div><span>Ritmo atual de entrada</span><strong>{integer(Math.round(recentCohorts.projectedNewEntrantsNext30 || 0))}</strong><small>projecao para 30d · efeito dentro da janela: {compactMoney(recentCohorts.expectedWithinHorizonGmvFromFutureEntrants)}</small></div>
+          <div className="lag-cohort-grid">
+            <article className="lag-simple-card">
+              <header><div><span>Qualidade por mes de entrada</span><h3>Percentual da safra que ativa ate D+30</h3></div><small>somente safras com 30 dias completos</small></header>
+              <div className="lag-cohort-chart"><ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 650, height: 330 }}><ComposedChart data={matureMonthlyCohorts} margin={{ top: 18, right: 12, left: -4, bottom: 2 }}><CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} /><XAxis dataKey="month" tickFormatter={monthLabel} stroke="#667083" tick={{ fontSize: 10 }} /><YAxis domain={[0, 100]} tickFormatter={(value) => `${value}%`} stroke="#5E7880" tick={{ fontSize: 10 }} width={48} /><Tooltip content={<CohortQualityTooltip mode="activation" />} /><Bar dataKey="activation30Percent" name="Ativacao ate D+30" fill="#54D8E8" radius={[6, 6, 0, 0]} maxBarSize={48} /></ComposedChart></ResponsiveContainer></div>
+              <footer>Permite comparar se as safras recentes estao ativando melhor ou pior, sem misturar meses ainda incompletos.</footer>
+            </article>
+
+            <article className="lag-simple-card">
+              <header><div><span>Valor por safra</span><h3>GMV medio por creator nos primeiros 30 dias</h3></div><small>mes de primeira aparicao</small></header>
+              <div className="lag-cohort-chart"><ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 650, height: 330 }}><ComposedChart data={matureMonthlyCohorts} margin={{ top: 18, right: 12, left: 4, bottom: 2 }}><CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} /><XAxis dataKey="month" tickFormatter={monthLabel} stroke="#667083" tick={{ fontSize: 10 }} /><YAxis tickFormatter={compactMoney} stroke="#8A7547" tick={{ fontSize: 10 }} width={70} /><Tooltip content={<CohortQualityTooltip mode="gmv" />} /><Bar dataKey="averageGmv30" name="GMV medio em 30d" fill="#F6B84B" radius={[6, 6, 0, 0]} maxBarSize={48} /></ComposedChart></ResponsiveContainer></div>
+              <footer>A media e concentrada: os 10% maiores geram <b>{percent(maturity.top10ShareGmv30Percent)}</b> do GMV D0–D30. Leia junto com a ativacao.</footer>
+            </article>
           </div>
 
-          <article className="lag-chart-card forecast-card">
-            <div className="lag-chart-title"><div><span>Previsao operacional</span><h3>GMV diario observado e proximos 30 dias</h3></div><small>Faixa P10–P90 dos erros do backtest</small></div>
-            <div className="lag-forecast-chart">
-              <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 1240, height: 390 }}>
-                <ComposedChart data={forecastData} margin={{ top: 18, right: 8, left: -8, bottom: 2 }}>
-                  <defs><linearGradient id="forecastBandFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#A99BFF" stopOpacity=".30" /><stop offset="100%" stopColor="#A99BFF" stopOpacity=".05" /></linearGradient></defs>
-                  <CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} />
-                  <XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#5E6678" tick={{ fontSize: 10 }} minTickGap={28} />
-                  <YAxis stroke="#766F91" tickFormatter={compactMoney} tick={{ fontSize: 10 }} width={72} />
-                  <Tooltip content={<ForecastTooltip />} />
-                  <Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} />
-                  <Area type="monotone" dataKey="forecastBand" name="Faixa prevista" stroke="none" fill="url(#forecastBandFill)" connectNulls={false} />
-                  <Line type="monotone" dataKey="actualGmv" name="GMV observado" stroke="#54D8E8" strokeWidth={2.6} dot={false} connectNulls={false} />
-                  <Line type="monotone" dataKey="forecastGmv" name="GMV previsto" stroke="#C6B9FF" strokeWidth={3} strokeDasharray="7 5" dot={false} connectNulls={false} />
-                </ComposedChart>
-              </ResponsiveContainer>
-            </div>
+          <article className="lag-simple-card weekly-forecast-card">
+            <header><div><span>Previsao operacional, sem ruido diario</span><h3>GMV por semana: ultimas 4 observadas e proximas 4 previstas</h3></div><div className="weekly-forecast-total"><span>Proximos 30 dias</span><strong>{compactMoney(lagForecast.forecastGmv)}</strong><small>faixa {compactMoney(lagForecast.lowGmv)}–{compactMoney(lagForecast.highGmv)}</small></div></header>
+            <div className="lag-weekly-chart"><ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 1320, height: 370 }}><ComposedChart data={weeklyGmvData} margin={{ top: 20, right: 14, left: 4, bottom: 2 }}><CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} /><XAxis dataKey="period" stroke="#667083" tick={{ fontSize: 10 }} /><YAxis tickFormatter={compactMoney} stroke="#736C8A" tick={{ fontSize: 10 }} width={76} /><Tooltip content={<WeeklyGmvTooltip />} /><Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} /><Bar dataKey="observedGmv" name="GMV observado" fill="#54D8E8" radius={[7, 7, 0, 0]} maxBarSize={70} /><Bar dataKey="forecastGmv" name="GMV previsto" fill="#A99BFF" radius={[7, 7, 0, 0]} maxBarSize={70} /></ComposedChart></ResponsiveContainer></div>
+            <footer><span>Erro historico do modelo: <b>{percent(lagForecast.backtestWapePercent)}</b>.</span><span>Novos dos ultimos 30d devem contribuir <b>{compactMoney(recentCohorts.expectedNext30Gmv)}</b> no proximo periodo.</span><em>A previsao total ja inclui o efeito das coortes; nao somar novamente.</em></footer>
           </article>
 
-          <div className="lag-chart-grid">
-            <article className="lag-chart-card">
-              <div className="lag-chart-title"><div><span>Maturacao das novas safras</span><h3>Ativacao e receita por creator</h3></div><small>{integer(maturity.cohortCreators)} primeiras aparicoes analisadas</small></div>
-              <div className="lag-small-chart">
-                <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 610, height: 330 }}>
-                  <ComposedChart data={maturityPoints} margin={{ top: 16, right: 0, left: -8, bottom: 2 }}>
-                    <CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} />
-                    <XAxis dataKey="ageDays" tickFormatter={(value) => `D+${value}`} stroke="#5E6678" tick={{ fontSize: 10 }} minTickGap={24} />
-                    <YAxis yAxisId="activation" stroke="#3D7B82" tickFormatter={(value) => `${Math.round(value)}%`} tick={{ fontSize: 10 }} width={46} domain={[0, 100]} />
-                    <YAxis yAxisId="revenue" orientation="right" stroke="#A5783A" tickFormatter={compactMoney} tick={{ fontSize: 10 }} width={62} />
-                    <Tooltip content={<MaturityTooltip />} />
-                    <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
-                    <Line yAxisId="activation" type="monotone" dataKey="activationPercent" name="Ativados com GMV" stroke="#54D8E8" strokeWidth={3} dot={false} />
-                    <Line yAxisId="revenue" type="monotone" dataKey="averageCumulativeAmplifyRevenue" name="Receita Amplify media acumulada" stroke="#F6B84B" strokeWidth={3} dot={false} />
-                  </ComposedChart>
-                </ResponsiveContainer>
-              </div>
-              <footer><span>P90 do primeiro GMV entre os ativados: <b>D+{integer(maturity.p90DaysToFirstGmv)}</b>. Top 10% gera <b>{percent(maturity.top10ShareGmv30Percent)}</b> do GMV D0–D30.</span><em>{percent(100 - maturity.activation30Percent)} ainda nao geraram GMV ate D+30.</em></footer>
-            </article>
+          <article className="lag-evidence-card">
+            <div><span>Teste real da carteira</span><h3>Menos creators nao significou menos GMV.</h3><p>Entre {date(stockDrawdown.peakDate)} e {date(stockDrawdown.troughDate)}, a base encolheu, mas o GMV dos 30 dias seguintes cresceu. O que saiu tinha baixa participacao economica.</p></div>
+            <div className="lag-evidence-comparison"><div className="down"><span>Creators ativos</span><strong>{integer(stockDrawdown.peakStock)} → {integer(stockDrawdown.troughStock)}</strong><small>{signedInteger(stockDrawdown.stockChange)} creators</small></div><div className="up"><span>GMV 30d</span><strong>{compactMoney(stockDrawdown.prior30Gmv)} → {compactMoney(stockDrawdown.future30Gmv)}</strong><small>+{percent(stockDrawdown.futureVsPriorGmvPercent)}</small></div><div><span>Peso de quem saiu</span><strong>{percent(stockDrawdown.lostShareOfPeakPrior30Gmv)}</strong><small>do GMV anterior</small></div></div>
+          </article>
 
-            <article className="lag-chart-card">
-              <div className="lag-chart-title"><div><span>Efeito defasado observado</span><h3>Variacao da carteira x crescimento futuro do GMV</h3></div><small>pico fraco em {integer(lagEffect.bestObservedLagDays)} dias · corr. {Number(lagEffect.bestStockGrowthCorrelation || 0).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}</small></div>
-              <div className="lag-small-chart">
-                <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 610, height: 330 }}>
-                  <ComposedChart data={lagEffect.points || []} margin={{ top: 16, right: 8, left: -8, bottom: 2 }}>
-                    <CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} />
-                    <XAxis dataKey="lagDays" tickFormatter={(value) => `${value}d`} stroke="#5E6678" tick={{ fontSize: 10 }} minTickGap={22} />
-                    <YAxis stroke="#766F91" tick={{ fontSize: 10 }} width={42} domain={[-1, 1]} />
-                    <Tooltip content={<LagTooltip />} />
-                    <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
-                    <Line type="monotone" dataKey="stockGrowthCorrelation" name="Correlacao estacionarizada" stroke="#A99BFF" strokeWidth={3} dot={false} />
-                  </ComposedChart>
-                </ResponsiveContainer>
-              </div>
-              <footer><span>A coorte aponta efeito economico principalmente entre <b>D+7 e D+21</b>.</span><em>O sinal agregado e fraco: nao ha evidencia de um atraso fixo nem de causalidade.</em></footer>
-            </article>
-          </div>
-
-          <div className="lag-pattern-grid">
-            <article className="lag-chart-card cohort-card">
-              <div className="lag-chart-title"><div><span>Qualidade das safras</span><h3>Ativacao e receita aos 30 dias</h3></div><small>somente meses com janela D+30 completa</small></div>
-              <div className="lag-small-chart cohort-chart">
-                <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 760, height: 330 }}>
-                  <ComposedChart data={matureMonthlyCohorts} margin={{ top: 16, right: 4, left: -6, bottom: 2 }}>
-                    <CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} />
-                    <XAxis dataKey="month" tickFormatter={monthLabel} stroke="#5E6678" tick={{ fontSize: 10 }} />
-                    <YAxis yAxisId="revenue" stroke="#A5783A" tickFormatter={compactMoney} tick={{ fontSize: 10 }} width={62} />
-                    <YAxis yAxisId="activation" orientation="right" stroke="#3D7B82" tickFormatter={(value) => `${Math.round(value)}%`} tick={{ fontSize: 10 }} width={48} domain={[0, 100]} />
-                    <Tooltip content={<CohortTooltip />} />
-                    <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
-                    <Bar yAxisId="revenue" dataKey="averageAmplifyRevenue30" name="Receita Amplify media em 30d" fill="#F6B84B" radius={[7, 7, 0, 0]} maxBarSize={42} />
-                    <Line yAxisId="activation" type="monotone" dataKey="activation30Percent" name="Ativacao ate D+30" stroke="#54D8E8" strokeWidth={3} dot={{ r: 3 }} />
-                  </ComposedChart>
-                </ResponsiveContainer>
-              </div>
-            </article>
-
-            <article className="drawdown-card">
-              <span className="drawdown-kicker">O caso dos 2 mil → 1,78 mil</span>
-              <h3>A queda de volume nao virou uma queda proporcional de GMV.</h3>
-              <div className="drawdown-stats">
-                <div><span>Carteira</span><strong>{integer(stockDrawdown.peakStock)} → {integer(stockDrawdown.troughStock)}</strong><small>{date(stockDrawdown.peakDate)} a {date(stockDrawdown.troughDate)}</small></div>
-                <div><span>GMV · 30d antes → 30d depois</span><strong>{compactMoney(stockDrawdown.prior30Gmv)} → {compactMoney(stockDrawdown.future30Gmv)}</strong><small>{Number(stockDrawdown.futureVsPriorGmvPercent || 0) >= 0 ? "+" : ""}{percent(stockDrawdown.futureVsPriorGmvPercent)} mesmo com a queda</small></div>
-                <div><span>GMV previo dos que sairam</span><strong>{percent(stockDrawdown.lostShareOfPeakPrior30Gmv)}</strong><small>do GMV da carteira no pico</small></div>
-                <div><span>GMV deles nos 30d seguintes</span><strong>{percent(stockDrawdown.lostCreatorsShareOfFuture30Gmv)}</strong><small>do GMV total seguinte</small></div>
-              </div>
-              <p>Foram <b>{integer(stockDrawdown.lostCreators)} saidas</b> e {integer(stockDrawdown.gainedCreators)} entradas entre os dois pontos. Quem saiu tinha GMV mediano de apenas <b>{money(stockDrawdown.lostMedianPrior30Gmv)}</b> nos 30 dias anteriores. Por isso, prever so pela quantidade de agenciados seria enganoso: <b>qualidade e ativacao pesam mais que o estoque bruto.</b></p>
-            </article>
-          </div>
-
-          <div className="lag-method-note"><b>Leitura financeira:</b> receita Amplify = 10% da comissao estimada do creator. Isto mede receita bruta gerada pela safra; payback liquido so existira quando o custo real de agenciamento e operacao estiver cadastrado.</div>
+          <div className="lag-method-note"><b>Como ler:</b> entrada e a primeira aparicao do creator no ledger. Ativacao significa ter algum GMV. GMV medio pode ser puxado por poucos creators; por isso ativacao e valor aparecem em graficos separados.</div>
         </section>}
 
         <section className="affiliation-movement-copy">
@@ -668,6 +629,57 @@ export default function CreatorEconomicsView() {
             </ResponsiveContainer>
           </div>
           <footer><span><b>Novos agenciados:</b> primeira aparicao observada do creator no ledger.</span><span><b>Desvinculados:</b> presente no dia anterior e ausente no dia atual.</span><em>As duas linhas usam a mesma unidade e o mesmo eixo.</em></footer>
+        </section>
+
+        <section className="movement-section econ-panel">
+          <header><div><span>Movimentacao diaria da base</span><h2>Entradas, retornos e saidas observadas</h2></div><div className="movement-head-side"><small>Saida observada = estava no relatorio ontem e nao apareceu hoje. Nao substitui o status oficial do Partner Center.</small><div className="view-switch"><button className={movementWindow === "30" ? "active" : ""} onClick={() => setMovementWindow("30")}>30d</button><button className={movementWindow === "60" ? "active" : ""} onClick={() => setMovementWindow("60")}>60d</button><button className={movementWindow === "all" ? "active" : ""} onClick={() => setMovementWindow("all")}>Tudo</button></div></div></header>
+          <div className="movement-kpis">
+            <div><span>Eventos de saida</span><strong>{integer(portfolio.summary?.exitEvents)}</strong><small>{integer(portfolio.summary?.uniqueExitedCreators)} creators unicos</small></div>
+            <div><span>Primeiras aparicoes</span><strong>{integer(portfolio.summary?.firstAppearances)}</strong><small>primeira vez no historico</small></div>
+            <div><span>Retornos</span><strong>{integer(portfolio.summary?.returns)}</strong><small>voltaram apos ausencia</small></div>
+            <div><span>Saldo liquido</span><strong className={(portfolio.summary?.net || 0) >= 0 ? "positive" : "negative"}>{signedInteger(portfolio.summary?.net)}</strong><small>adicoes menos saidas</small></div>
+            <div><span>GMV previo 30d associado</span><strong>{compactMoney(portfolio.summary?.exitedGmvPrior30d)}</strong><small>{integer(portfolio.summary?.gmvCompleteDays)} dias com janela completa</small></div>
+            <div><span>Taxa de saida</span><strong>{percent(portfolio.summary?.exitRatePerCreatorDay)}</strong><small>eventos / creator-dias anteriores</small></div>
+          </div>
+          <div className="movement-chart">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 1320, height: 350 }}>
+              <ComposedChart data={movementChartData} margin={{ top: 20, right: 12, left: -2, bottom: 0 }}>
+                <CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} />
+                <XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#5E6678" tick={{ fontSize: 10 }} minTickGap={30} />
+                <YAxis yAxisId="people" stroke="#6B7180" tick={{ fontSize: 10 }} width={42} />
+                <YAxis yAxisId="gmv" orientation="right" tickFormatter={compactMoney} stroke="#8A6069" tick={{ fontSize: 10 }} width={72} />
+                <Tooltip content={<MovementTooltip />} />
+                <Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} />
+                <Bar yAxisId="people" dataKey="firstAppearances" name="Primeiras aparicoes" fill="#6E8CFF" radius={[3, 3, 0, 0]} />
+                <Bar yAxisId="people" dataKey="returns" name="Retornos" fill="#F6B84B" radius={[3, 3, 0, 0]} />
+                <Bar yAxisId="people" dataKey="exits" name="Saidas observadas" fill="#FF647C" radius={[3, 3, 0, 0]} />
+                <Line yAxisId="gmv" type="monotone" dataKey="exitedGmvPrior30d" name="GMV previo 30d associado" stroke="#FF9AAC" strokeWidth={2.5} dot={false} connectNulls={false} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+          <footer><span>{portfolio.definitions?.exit}</span><b>{portfolio.definitions?.gmvPrior30d}</b>{source !== "all" && <em>Visao global: filtro de origem nao aplicado.</em>}</footer>
+        </section>
+
+        <section className="affiliation-movement-copy affiliation-returns-only">
+          <header className="affiliation-movement-head">
+            <div><span className="affiliation-kicker">Reativacao da carteira</span><h2>Creators que voltaram por dia</h2><p>Mostra somente creators que reapareceram depois de pelo menos um dia ausentes, sem misturar primeiras aparicoes ou saidas.</p></div>
+            <div className="daily-movement-latest">
+              <div><span>Retornos no periodo</span><strong className="returning">{integer(selectedReturnsTotal)}</strong></div>
+              <div><span>Media por dia</span><strong className="returning">{decimal(selectedReturnsDailyAverage)}</strong></div>
+            </div>
+          </header>
+          <div className="affiliation-movement-chart">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 1240, height: 390 }}>
+              <ComposedChart data={movementChartData} margin={{ top: 20, right: 12, left: -4, bottom: 2 }}>
+                <CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} />
+                <XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#5E6678" tick={{ fontSize: 10 }} minTickGap={32} />
+                <YAxis allowDecimals={false} stroke="#8A7547" tick={{ fontSize: 10 }} width={52} domain={[0, "dataMax + 2"]} />
+                <Tooltip content={<MovementTooltip />} />
+                <Bar dataKey="returns" name="Creators que voltaram" fill="#F6B84B" radius={[5, 5, 0, 0]} maxBarSize={30} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+          <footer><span><b>Retorno:</b> creator presente hoje, ausente ontem e ja observado antes no historico.</span><span>O seletor de 30d, 60d ou tudo do bloco acima tambem controla este grafico.</span><em>Retorno nao e primeira aparicao e nao entra como novo agenciado.</em></footer>
         </section>
 
         <section className="affiliation-movement-copy affiliation-flow-only affiliation-flow-average7-copy">
@@ -766,35 +778,6 @@ export default function CreatorEconomicsView() {
           <footer><span>{profitability.definitions?.revenue}</span><span>{profitability.definitions?.knownCost}</span><b>{profitability.definitions?.result}</b>{source !== "all" && <em>Visao global: o filtro de origem nao altera esta secao.</em>}</footer>
         </section>
 
-        <section className="movement-section econ-panel">
-          <header><div><span>Movimentacao diaria da base</span><h2>Entradas, retornos e saidas observadas</h2></div><div className="movement-head-side"><small>Saida observada = estava no relatorio ontem e nao apareceu hoje. Nao substitui o status oficial do Partner Center.</small><div className="view-switch"><button className={movementWindow === "30" ? "active" : ""} onClick={() => setMovementWindow("30")}>30d</button><button className={movementWindow === "60" ? "active" : ""} onClick={() => setMovementWindow("60")}>60d</button><button className={movementWindow === "all" ? "active" : ""} onClick={() => setMovementWindow("all")}>Tudo</button></div></div></header>
-          <div className="movement-kpis">
-            <div><span>Eventos de saida</span><strong>{integer(portfolio.summary?.exitEvents)}</strong><small>{integer(portfolio.summary?.uniqueExitedCreators)} creators unicos</small></div>
-            <div><span>Primeiras aparicoes</span><strong>{integer(portfolio.summary?.firstAppearances)}</strong><small>primeira vez no historico</small></div>
-            <div><span>Retornos</span><strong>{integer(portfolio.summary?.returns)}</strong><small>voltaram apos ausencia</small></div>
-            <div><span>Saldo liquido</span><strong className={(portfolio.summary?.net || 0) >= 0 ? "positive" : "negative"}>{signedInteger(portfolio.summary?.net)}</strong><small>adicoes menos saidas</small></div>
-            <div><span>GMV previo 30d associado</span><strong>{compactMoney(portfolio.summary?.exitedGmvPrior30d)}</strong><small>{integer(portfolio.summary?.gmvCompleteDays)} dias com janela completa</small></div>
-            <div><span>Taxa de saida</span><strong>{percent(portfolio.summary?.exitRatePerCreatorDay)}</strong><small>eventos / creator-dias anteriores</small></div>
-          </div>
-          <div className="movement-chart">
-            <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 1320, height: 350 }}>
-              <ComposedChart data={movementChartData} margin={{ top: 20, right: 12, left: -2, bottom: 0 }}>
-                <CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} />
-                <XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#5E6678" tick={{ fontSize: 10 }} minTickGap={30} />
-                <YAxis yAxisId="people" stroke="#6B7180" tick={{ fontSize: 10 }} width={42} />
-                <YAxis yAxisId="gmv" orientation="right" tickFormatter={compactMoney} stroke="#8A6069" tick={{ fontSize: 10 }} width={72} />
-                <Tooltip content={<MovementTooltip />} />
-                <Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} />
-                <Bar yAxisId="people" dataKey="firstAppearances" name="Primeiras aparicoes" fill="#6E8CFF" radius={[3, 3, 0, 0]} />
-                <Bar yAxisId="people" dataKey="returns" name="Retornos" fill="#F6B84B" radius={[3, 3, 0, 0]} />
-                <Bar yAxisId="people" dataKey="exits" name="Saidas observadas" fill="#FF647C" radius={[3, 3, 0, 0]} />
-                <Line yAxisId="gmv" type="monotone" dataKey="exitedGmvPrior30d" name="GMV previo 30d associado" stroke="#FF9AAC" strokeWidth={2.5} dot={false} connectNulls={false} />
-              </ComposedChart>
-            </ResponsiveContainer>
-          </div>
-          <footer><span>{portfolio.definitions?.exit}</span><b>{portfolio.definitions?.gmvPrior30d}</b>{source !== "all" && <em>Visao global: filtro de origem nao aplicado.</em>}</footer>
-        </section>
-
         <section className="portfolio-grid">
           <article className="econ-panel monthly-performance">
             <header><div><span>GMV mensal da carteira</span><h2>Volume e creators vendendo</h2></div><small>Soma dos relatorios fechados de um unico dia, sem delta de snapshot acumulado.</small></header>
@@ -821,7 +804,8 @@ export default function CreatorEconomicsView() {
 
           <div className="tier-rules">{(tierAnalytics.tiers || []).map((tier) => <div key={tier.key} style={{ "--tier-color": tier.color }}><i /><span>{tier.label}</span><strong>{compactMoney(tier.minExclusive)}–{compactMoney(tier.maxInclusive)}</strong></div>)}</div>
 
-          <div className="tier-monthly-chart">
+          <div className="tier-chart-focus-head"><div><span>Evolucao mensal dos monetizados</span><h3>Creators com GMV, de Start para cima</h3><p>Este grafico exclui completamente a base sem GMV para mostrar somente a distribuicao entre as categorias internas.</p></div><div><span>{monthLabel(latestTierMonth.month)}</span><strong>{integer(latestTierMonth.categorizedCreators)}</strong><small>monetizados · {integer(latestAboveStart)} acima de Start</small></div></div>
+          <div className="tier-monthly-chart tier-monetized-only-chart">
             <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 1360, height: 350 }}>
               <ComposedChart data={tierAnalytics.monthly || []} margin={{ top: 18, right: 12, left: 0, bottom: 0 }}>
                 <CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} />
@@ -830,7 +814,6 @@ export default function CreatorEconomicsView() {
                 <Tooltip content={<ChartTooltip />} />
                 <Legend wrapperStyle={{ fontSize: 10, paddingTop: 10 }} />
                 {(tierAnalytics.tiers || []).map((tier) => <Bar key={tier.key} dataKey={tier.key} name={tier.label} stackId="tiers" fill={tier.color} radius={tier.key === "safira" ? [5, 5, 0, 0] : undefined} />)}
-                <Line type="monotone" dataKey="noGmvCreators" name="Sem GMV · estado auxiliar" stroke="#596273" strokeWidth={2} strokeDasharray="5 5" dot={false} />
               </ComposedChart>
             </ResponsiveContainer>
           </div>
@@ -954,6 +937,18 @@ export default function CreatorEconomicsView() {
       .portfolio-growth-strip{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid rgba(255,255,255,.07)}.portfolio-growth-strip>div{padding:18px 20px;border-right:1px solid rgba(255,255,255,.06)}.portfolio-growth-strip>div:last-child{border-right:0}.portfolio-growth-strip strong{display:block;margin:7px 0 5px;color:#E9EDF5;font-size:22px}.portfolio-growth-strip small{display:block;color:#737C8E;font-size:9px;line-height:1.4}.portfolio-projection-note{display:flex;gap:9px;align-items:flex-start;padding:13px 22px;color:#858FA2;font:550 9px/1.5 ui-monospace,monospace}.portfolio-projection-note b{color:#47D7A0;white-space:nowrap}.portfolio-projection-note em{font-style:normal;color:#9A7D84}
       @media(max-width:900px){.portfolio-projection-head{display:grid}.portfolio-backtest-pill{min-width:0;width:max-content}.portfolio-projection-summary{grid-template-columns:1fr 1fr}.portfolio-projection-summary>div:nth-child(2){border-right:0}.portfolio-projection-summary>div:nth-child(-n+2){border-bottom:1px solid rgba(255,255,255,.06)}.portfolio-scenario-switch{grid-template-columns:1fr 1fr}.portfolio-scenario-switch button:last-child{grid-column:1/-1}.portfolio-projection-grid{grid-template-columns:1fr}.portfolio-projection-card{border-right:0}.portfolio-stock-card{grid-column:auto}.portfolio-growth-strip{grid-template-columns:1fr 1fr}.portfolio-growth-strip>div:nth-child(2n){border-right:0}.portfolio-growth-strip>div:nth-child(-n+2){border-bottom:1px solid rgba(255,255,255,.06)}}
       @media(max-width:560px){.portfolio-projection-head{padding:23px 17px 18px}.portfolio-projection-head h2{font-size:25px}.portfolio-projection-summary{grid-template-columns:1fr}.portfolio-projection-summary>div{border-right:0;border-bottom:1px solid rgba(255,255,255,.06);padding:16px 15px}.portfolio-projection-summary>div:last-child{border-bottom:0}.portfolio-scenario-switch{grid-template-columns:1fr;padding:11px}.portfolio-scenario-switch button:last-child{grid-column:auto}.portfolio-projection-card>header{display:grid;padding:16px 15px 8px}.portfolio-projection-card>header small{text-align:left}.portfolio-stock-chart{height:350px;padding-left:0;padding-right:0}.portfolio-flow-chart{height:330px;padding-left:0;padding-right:0}.portfolio-assumption-grid{margin-left:12px;margin-right:12px}.portfolio-assumption-grid strong{font-size:18px}.portfolio-growth-strip{grid-template-columns:1fr}.portfolio-growth-strip>div{border-right:0;border-bottom:1px solid rgba(255,255,255,.06);padding:15px}.portfolio-growth-strip>div:last-child{border-bottom:0}.portfolio-projection-note{display:grid;padding:12px 15px}}
+    `}</style>
+    <style jsx global>{`
+      .lag-simple-head{display:flex;align-items:flex-start;justify-content:space-between;gap:28px;padding:28px;border-bottom:1px solid rgba(255,255,255,.07)}
+      .lag-simple-head h2{margin:0;color:#F7F8FC;font-size:32px;letter-spacing:-.045em}.lag-simple-head p{max-width:780px;margin:9px 0 0;color:#8790A1;font-size:12px;line-height:1.5}
+      .lag-thesis{min-width:235px;padding:14px 16px;border:1px solid rgba(255,100,124,.25);border-radius:13px;background:rgba(255,100,124,.055)}.lag-thesis span,.weekly-forecast-total span,.tier-chart-focus-head span{display:block;color:#A8818A;font:750 8px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.09em}.lag-thesis strong{display:block;margin:6px 0 3px;color:#FF9AAC;font-size:24px;letter-spacing:-.04em}.lag-thesis small{color:#818A9C;font-size:9px}
+      .lag-simple-grid,.lag-cohort-grid{display:grid;grid-template-columns:1.15fr .85fr;border-bottom:1px solid rgba(255,255,255,.07)}.lag-cohort-grid{grid-template-columns:1fr 1fr}.lag-simple-card{min-width:0;border-right:1px solid rgba(255,255,255,.065);background:rgba(5,8,13,.18)}.lag-simple-grid>.lag-simple-card:last-child,.lag-cohort-grid>.lag-simple-card:last-child{border-right:0}.lag-simple-card>header{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;padding:19px 21px 8px}.lag-simple-card>header span{display:block;color:#7D8698;font:750 8px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.09em}.lag-simple-card h3{margin:5px 0 0;color:#EEF1F7;font-size:19px;letter-spacing:-.025em}.lag-simple-card>header small{color:#717A8C;font:600 8px ui-monospace,monospace;text-align:right}.lag-simple-card>footer{display:flex;gap:6px;flex-wrap:wrap;min-height:48px;padding:12px 20px;border-top:1px solid rgba(255,255,255,.06);color:#858EA0;font-size:10px;line-height:1.45}.lag-simple-card>footer b{color:#54D8E8}.lag-simple-card>footer em{color:#F6B84B;font-style:normal}
+      .lag-simple-chart{height:330px;padding:4px 8px 14px}.lag-cohort-chart{height:320px;padding:4px 8px 14px}.weekly-forecast-card{border-right:0;border-bottom:1px solid rgba(255,255,255,.07)}.weekly-forecast-total{text-align:right;min-width:220px}.weekly-forecast-total strong{display:block;margin:5px 0 2px;color:#D8D1FF;font-size:23px}.weekly-forecast-total small{color:#747D8F;font-size:9px}.lag-weekly-chart{height:375px;padding:4px 12px 18px}
+      .lag-evidence-card{display:grid;grid-template-columns:minmax(280px,.8fr) minmax(0,1.2fr);gap:28px;align-items:center;padding:22px 24px;border-bottom:1px solid rgba(255,255,255,.07);background:linear-gradient(120deg,rgba(71,215,160,.05),transparent 46%)}.lag-evidence-card>div:first-child>span{color:#47D7A0;font:750 8px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.09em}.lag-evidence-card h3{margin:6px 0 7px;color:#EEF2F7;font-size:22px}.lag-evidence-card p{margin:0;color:#818A9D;font-size:10px;line-height:1.5}.lag-evidence-comparison{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid rgba(255,255,255,.07);border-radius:12px;overflow:hidden}.lag-evidence-comparison>div{padding:14px;border-right:1px solid rgba(255,255,255,.06)}.lag-evidence-comparison>div:last-child{border-right:0}.lag-evidence-comparison span{display:block;color:#7D8698;font:750 8px ui-monospace,monospace;text-transform:uppercase}.lag-evidence-comparison strong{display:block;margin:6px 0 3px;color:#E9EDF5;font-size:18px}.lag-evidence-comparison small{color:#747D8E;font-size:9px}.lag-evidence-comparison .down small{color:#FF7D91}.lag-evidence-comparison .up small{color:#47D7A0}
+      .affiliation-returns-only{border-color:rgba(246,184,75,.24);background:linear-gradient(145deg,rgba(246,184,75,.06),rgba(12,15,24,.94) 30%,rgba(8,11,18,.97))}.affiliation-returns-only:before{background:linear-gradient(#F6B84B,#C6903C)}.daily-movement-latest strong.returning{color:#F6B84B}.affiliation-returns-only .affiliation-movement-chart{height:370px}
+      .tier-chart-focus-head{display:flex;align-items:flex-end;justify-content:space-between;gap:22px;padding:18px 22px 6px}.tier-chart-focus-head h3{margin:5px 0 0;color:#EDF1F7;font-size:20px;letter-spacing:-.025em}.tier-chart-focus-head p{margin:6px 0 0;color:#7F889A;font-size:10px}.tier-chart-focus-head>div:last-child{text-align:right;min-width:185px}.tier-chart-focus-head>div:last-child span{color:#62D8FF}.tier-chart-focus-head strong{display:block;margin:4px 0 2px;color:#DDF8FF;font-size:24px}.tier-chart-focus-head small{color:#747D8E;font-size:9px}.tier-monetized-only-chart{padding-top:0}
+      @media(max-width:900px){.lag-simple-head{display:grid}.lag-thesis{min-width:0;width:max-content}.lag-simple-grid,.lag-cohort-grid{grid-template-columns:1fr}.lag-simple-card{border-right:0;border-bottom:1px solid rgba(255,255,255,.065)}.lag-simple-grid>.lag-simple-card:last-child,.lag-cohort-grid>.lag-simple-card:last-child{border-bottom:0}.lag-evidence-card{grid-template-columns:1fr}.tier-chart-focus-head{align-items:flex-start}}
+      @media(max-width:560px){.lag-simple-head{padding:23px 17px 18px}.lag-simple-head h2{font-size:25px}.lag-thesis{width:100%}.lag-simple-card>header{display:grid;padding:17px 15px 7px}.lag-simple-card>header small{text-align:left}.lag-simple-chart,.lag-cohort-chart{height:320px;padding-left:0;padding-right:0}.lag-weekly-chart{height:340px;padding-left:0;padding-right:0}.weekly-forecast-total{text-align:left;min-width:0}.lag-evidence-card{padding:18px 15px}.lag-evidence-comparison{grid-template-columns:1fr}.lag-evidence-comparison>div{border-right:0;border-bottom:1px solid rgba(255,255,255,.06)}.lag-evidence-comparison>div:last-child{border-bottom:0}.tier-chart-focus-head{display:grid;padding:16px 16px 3px}.tier-chart-focus-head>div:last-child{text-align:left}.affiliation-returns-only .affiliation-movement-chart{height:320px}}
     `}</style>
   </main>
 }
