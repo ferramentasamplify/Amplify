@@ -144,10 +144,10 @@ export default function CreatorEconomicsView() {
 
   const chartData = useMemo(() => (data?.monthly || []).map((item) => ({ ...item, label: monthLabel(item.month) })), [data])
   const dailyData = useMemo(() => data?.affiliationDaily?.series || [], [data])
-  const weekendDates = useMemo(() => dailyData.filter((item) => {
+  const weekendIndexes = useMemo(() => dailyData.flatMap((item, index) => {
     const weekDay = new Date(`${item.date}T12:00:00Z`).getUTCDay()
-    return weekDay === 0 || weekDay === 6
-  }).map((item) => item.date), [dailyData])
+    return weekDay === 0 || weekDay === 6 ? [index] : []
+  }), [dailyData])
   const trendData = useMemo(() => dailyData.map((item, index, rows) => {
     const conversionRate = item.affiliatedCreators ? item.gmvCreators / item.affiliatedCreators * 100 : 0
     const gmvPerAffiliated = item.affiliatedCreators ? item.dailyGmv / item.affiliatedCreators : 0
@@ -261,7 +261,7 @@ export default function CreatorEconomicsView() {
                 <ComposedChart data={dailyData} margin={{ top: 18, right: 8, left: -10, bottom: 0 }}>
                   <defs><linearGradient id="affiliationFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#A99BFF" stopOpacity=".32" /><stop offset="100%" stopColor="#A99BFF" stopOpacity=".01" /></linearGradient></defs>
                   <CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} />
-                  <CartesianGrid horizontal={false} verticalValues={weekendDates} syncWithTicks stroke="rgba(173,181,197,.18)" strokeWidth={0.8} />
+                  <CartesianGrid horizontal={false} stroke="rgba(173,181,197,.18)" strokeWidth={0.8} verticalCoordinatesGenerator={({ offset }) => weekendIndexes.map((index) => offset.left + index * offset.width / Math.max(1, dailyData.length - 1))} />
                   <XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#5E6678" tick={{ fontSize: 10 }} minTickGap={32} />
                   <YAxis yAxisId="affiliated" stroke="#766F91" tick={{ fontSize: 10 }} width={54} domain={["dataMin - 40", "dataMax + 40"]} />
                   <YAxis yAxisId="gmv" orientation="right" stroke="#3D7180" tick={{ fontSize: 10 }} width={46} />
@@ -286,7 +286,7 @@ export default function CreatorEconomicsView() {
               <ComposedChart data={dailyData} margin={{ top: 20, right: 8, left: -8, bottom: 2 }}>
                 <defs><linearGradient id="affiliationGmvFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#A99BFF" stopOpacity=".27" /><stop offset="100%" stopColor="#A99BFF" stopOpacity=".01" /></linearGradient></defs>
                 <CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} />
-                <CartesianGrid horizontal={false} verticalValues={weekendDates} syncWithTicks stroke="rgba(173,181,197,.18)" strokeWidth={0.8} />
+                <CartesianGrid horizontal={false} stroke="rgba(173,181,197,.18)" strokeWidth={0.8} verticalCoordinatesGenerator={({ offset }) => weekendIndexes.map((index) => offset.left + index * offset.width / Math.max(1, dailyData.length - 1))} />
                 <XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#5E6678" tick={{ fontSize: 10 }} minTickGap={32} />
                 <YAxis yAxisId="affiliated" stroke="#766F91" tick={{ fontSize: 10 }} width={52} domain={["dataMin - 40", "dataMax + 40"]} />
                 <YAxis yAxisId="dailyGmv" orientation="right" stroke="#A5783A" tickFormatter={compactMoney} tick={{ fontSize: 10 }} width={70} />
@@ -311,7 +311,7 @@ export default function CreatorEconomicsView() {
               <ComposedChart data={dailyData} margin={{ top: 20, right: 8, left: -8, bottom: 2 }}>
                 <defs><linearGradient id="affiliationGmvMonthFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#A99BFF" stopOpacity=".27" /><stop offset="100%" stopColor="#A99BFF" stopOpacity=".01" /></linearGradient></defs>
                 <CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} />
-                <CartesianGrid horizontal={false} verticalValues={weekendDates} syncWithTicks stroke="rgba(173,181,197,.18)" strokeWidth={0.8} />
+                <CartesianGrid horizontal={false} stroke="rgba(173,181,197,.18)" strokeWidth={0.8} verticalCoordinatesGenerator={({ offset }) => weekendIndexes.map((index) => offset.left + index * offset.width / Math.max(1, dailyData.length - 1))} />
                 <XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#5E6678" tick={{ fontSize: 10 }} minTickGap={32} />
                 <YAxis yAxisId="affiliated" stroke="#766F91" tick={{ fontSize: 10 }} width={52} domain={["dataMin - 40", "dataMax + 40"]} />
                 <YAxis yAxisId="dailyGmv" orientation="right" stroke="#A5783A" tickFormatter={compactMoney} tick={{ fontSize: 10 }} width={70} />
@@ -336,7 +336,7 @@ export default function CreatorEconomicsView() {
               <ComposedChart data={dailyData} margin={{ top: 20, right: 8, left: -8, bottom: 2 }}>
                 <defs><linearGradient id="affiliationGmvRollingFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#A99BFF" stopOpacity=".27" /><stop offset="100%" stopColor="#A99BFF" stopOpacity=".01" /></linearGradient></defs>
                 <CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} />
-                <CartesianGrid horizontal={false} verticalValues={weekendDates} syncWithTicks stroke="rgba(173,181,197,.18)" strokeWidth={0.8} />
+                <CartesianGrid horizontal={false} stroke="rgba(173,181,197,.18)" strokeWidth={0.8} verticalCoordinatesGenerator={({ offset }) => weekendIndexes.map((index) => offset.left + index * offset.width / Math.max(1, dailyData.length - 1))} />
                 <XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#5E6678" tick={{ fontSize: 10 }} minTickGap={32} />
                 <YAxis yAxisId="affiliated" stroke="#766F91" tick={{ fontSize: 10 }} width={52} domain={["dataMin - 40", "dataMax + 40"]} />
                 <YAxis yAxisId="dailyGmv" orientation="right" stroke="#A5783A" tickFormatter={compactMoney} tick={{ fontSize: 10 }} width={70} />
