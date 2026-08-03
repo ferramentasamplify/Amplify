@@ -37,6 +37,13 @@ const healthDot = {
   orange: "#f59e0b",
   red: "#ef4444",
 };
+const VIEW_TABS = [
+  { id: "overview", label: "Resumo" },
+  { id: "goals", label: "Meta agosto" },
+  { id: "gmv", label: "GMV original" },
+  { id: "health", label: "Saúde" },
+  { id: "ranking", label: "Ranking" },
+];
 
 /** Cavalinho animado — foto circular com bobbing idle e posição X animada */
 function Horse({ am, trackPositionPct, gmvTotal, position, isLeader }) {
@@ -140,6 +147,7 @@ export default function AmCentralView() {
   const [chartMode, setChartMode] = useState("goal");
   const [legacyChartMode, setLegacyChartMode] = useState("split");
   const [selectedAmDrill, setSelectedAmDrill] = useState("");
+  const [activeView, setActiveView] = useState("overview");
 
   async function load() {
     setError("");
@@ -206,6 +214,7 @@ export default function AmCentralView() {
   const effectiveCoverage = freshness.effectiveCoverage || {};
   const availablePeriods = freshness.availablePeriods || [];
   const warnings = data?.warnings || [];
+  const sourceStatus = data?.sourceStatus || {};
   const goals = data?.goals || {};
   const timeline = data?.gmvTimeline || {};
   const goalTimeline = data?.goalTimeline || {};
@@ -235,6 +244,18 @@ export default function AmCentralView() {
   });
   const selectedRanking = ranking.find((item) => item.am.slug === selectedAmDrill);
   const drillCreators = selectedRanking?.creators?.slice(0, 12) || [];
+  const sourceBadges = [
+    {
+      label: sourceStatus.sales?.ok === false ? "GMV degradado" : "GMV OK",
+      ok: sourceStatus.sales?.ok !== false,
+      message: sourceStatus.sales?.message || "Snapshot de vendas carregado.",
+    },
+    {
+      label: sourceStatus.notion?.ok === false ? "Cadastro pendente" : "Cadastro OK",
+      ok: sourceStatus.notion?.ok !== false,
+      message: sourceStatus.notion?.message || "Notion carregado.",
+    },
+  ];
 
   return (
     <div className="min-h-screen bg-[#0A0B12] text-white font-sans">
@@ -312,7 +333,22 @@ export default function AmCentralView() {
             </div>
           )}
 
-          <div className="flex flex-col lg:flex-row lg:items-end lg:justify-end gap-4">
+          <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
+            <div className="flex flex-wrap gap-2">
+              {sourceBadges.map((source) => (
+                <span
+                  key={source.label}
+                  title={source.message}
+                  className={`rounded-lg border px-3 py-2 text-xs font-bold ${
+                    source.ok
+                      ? "border-emerald-400/25 bg-emerald-400/10 text-emerald-100"
+                      : "border-amber-400/25 bg-amber-400/10 text-amber-100"
+                  }`}
+                >
+                  {source.label}
+                </span>
+              ))}
+            </div>
               <PartnerCenterDateSelector
                 startDate={startDate}
                 endDate={endDate}
@@ -330,6 +366,26 @@ export default function AmCentralView() {
             )}
           </div>
 
+          <div className="rounded-2xl border border-white/10 bg-[#14161F] p-2">
+            <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
+              {VIEW_TABS.map((view) => (
+                <button
+                  key={view.id}
+                  type="button"
+                  onClick={() => setActiveView(view.id)}
+                  className={`rounded-xl px-3 py-2 text-xs font-black transition ${
+                    activeView === view.id
+                      ? "bg-white text-black"
+                      : "bg-white/[0.04] text-white/55 hover:bg-white/[0.08] hover:text-white"
+                  }`}
+                >
+                  {view.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {(activeView === "overview" || activeView === "goals") && (
           <section className="grid grid-cols-1 gap-4 lg:grid-cols-[360px_1fr]">
             <div className="bg-[#14161F] border border-white/10 rounded-2xl p-4">
               <div className="text-[10px] font-mono uppercase tracking-widest text-white/40">
@@ -406,7 +462,9 @@ export default function AmCentralView() {
               </div>
             )}
           </section>
+          )}
 
+          {activeView === "goals" && (
           <section className="bg-[#14161F] border border-white/10 rounded-3xl p-5 sm:p-6">
             <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 mb-5">
               <div>
@@ -479,8 +537,10 @@ export default function AmCentralView() {
               </ResponsiveContainer>
             </div>
           </section>
+          )}
 
           {/* Pista de corrida */}
+          {activeView === "overview" && (
           <div className="bg-gradient-to-br from-[#14161F] to-[#0F111A] border border-white/10 rounded-3xl p-6 sm:p-8">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-extrabold flex items-center gap-2">
@@ -549,7 +609,9 @@ export default function AmCentralView() {
               )})}
             </div>
           </div>
+          )}
 
+          {activeView === "gmv" && (
           <div className="bg-[#14161F] border border-white/10 rounded-3xl p-5 sm:p-6">
             <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 mb-5">
               <div>
@@ -600,7 +662,9 @@ export default function AmCentralView() {
               </ResponsiveContainer>
             </div>
           </div>
+          )}
 
+          {activeView === "health" && (
           <section className="bg-[#14161F] border border-white/10 rounded-3xl p-5 sm:p-6">
             <div className="mb-5 flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
               <div>
@@ -660,8 +724,10 @@ export default function AmCentralView() {
               })}
             </div>
           </section>
+          )}
 
           {/* Ranking detalhado */}
+          {activeView === "ranking" && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {ranking.map((r) => (
               <div
@@ -772,6 +838,7 @@ export default function AmCentralView() {
               </div>
             ))}
           </div>
+          )}
 
           <p className="text-center text-[10px] text-white/30 pb-4">
             Refresha a cada 90s · próxima att em {90 - (Math.floor(Date.now() / 1000) % 90)}s
