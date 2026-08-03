@@ -16,6 +16,14 @@ function readSelections() {
   }
 }
 
+function normalizeAreaSelection(value) {
+  if (Array.isArray(value)) return { added: value, hidden: [] };
+  return {
+    added: Array.isArray(value?.added) ? value.added : [],
+    hidden: Array.isArray(value?.hidden) ? value.hidden : [],
+  };
+}
+
 function AppCard({ app, color, imported, onRemove }) {
   const external = app.href.startsWith("http");
   return (
@@ -31,7 +39,7 @@ function AppCard({ app, color, imported, onRemove }) {
         <span className="text-white/30">{external ? "Sistema externo" : "Dentro do Hub"}</span>
         <span style={{ color }}>{external ? "Abrir ↗" : "Abrir →"}</span>
       </a>
-      {imported && <button type="button" onClick={onRemove} className="absolute right-4 top-4 grid h-8 w-8 place-items-center rounded-lg border border-white/10 bg-black/25 text-sm text-white/45 transition hover:border-red-300/30 hover:text-red-200" aria-label={`Remover ${app.title} desta area`} title="Remover desta area">×</button>}
+      <button type="button" onClick={onRemove} className="absolute right-4 top-4 grid h-8 w-8 place-items-center rounded-lg border border-white/10 bg-black/25 text-sm text-white/45 transition hover:border-red-300/30 hover:text-red-200" aria-label={`Remover ${app.title} desta area`} title="Remover desta area">×</button>
     </article>
   );
 }
@@ -67,30 +75,30 @@ function KrSection({ area, summary }) {
   );
 }
 
-function LibraryPicker({ area, selectedIds, onToggle, onClose }) {
-  const [sourceArea, setSourceArea] = useState(HUB_AREAS.find((item) => item.id !== area.id)?.id || "");
+function LibraryPicker({ area, selectedIds, hiddenIds, onToggle, onClose }) {
+  const [sourceArea, setSourceArea] = useState(area.id);
   const source = HUB_AREAS.find((item) => item.id === sourceArea);
   return (
     <section className="mt-5 rounded-2xl border border-white/15 bg-[#101218] p-4 sm:p-6" aria-labelledby="library-title">
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-[10px] font-black uppercase tracking-[.18em]" style={{ color: area.color }}>Biblioteca compartilhada</p>
-          <h3 id="library-title" className="mt-1 text-xl font-black">Adicionar ferramentas e links de outras areas</h3>
-          <p className="mt-2 text-sm text-white/40">Selecione um ou mais acessos. Eles passam a aparecer nesta area neste dispositivo.</p>
+          <h3 id="library-title" className="mt-1 text-xl font-black">Escolher ferramentas e links</h3>
+          <p className="mt-2 text-sm text-white/40">Marque para mostrar e desmarque para remover. A selecao fica salva neste dispositivo.</p>
         </div>
         <button type="button" onClick={onClose} className="min-h-11 rounded-lg border border-white/10 px-3 text-xs font-bold text-white/55 hover:text-white">Fechar</button>
       </div>
       <div className="mt-5 flex gap-2 overflow-x-auto pb-2" role="tablist" aria-label="Areas da biblioteca">
-        {HUB_AREAS.filter((item) => item.id !== area.id).map((item) => (
+        {HUB_AREAS.map((item) => (
           <button key={item.id} type="button" onClick={() => setSourceArea(item.id)} className="min-h-11 shrink-0 rounded-lg border px-3 text-xs font-bold transition" style={{ color: sourceArea === item.id ? item.color : "rgba(255,255,255,.45)", borderColor: sourceArea === item.id ? `${item.color}70` : "rgba(255,255,255,.1)", background: sourceArea === item.id ? `${item.color}12` : "transparent" }}>{item.name}</button>
         ))}
       </div>
       <div className="mt-3 grid gap-2 md:grid-cols-2">
         {(source?.apps || []).map((item) => {
-          const checked = selectedIds.includes(item.id);
+          const checked = sourceArea === area.id ? !hiddenIds.includes(item.id) : selectedIds.includes(item.id);
           return (
             <label key={item.id} className="flex cursor-pointer items-start gap-3 rounded-xl border border-white/[0.08] bg-black/20 p-4 transition hover:border-white/20">
-              <input type="checkbox" checked={checked} onChange={() => onToggle(item.id)} className="mt-1 h-5 w-5 accent-white" />
+              <input type="checkbox" checked={checked} onChange={() => onToggle(sourceArea, item.id)} className="mt-1 h-5 w-5 accent-white" />
               <span className="min-w-0 flex-1">
                 <span className="block text-sm font-black text-white">{item.title}</span>
                 <span className="mt-1 block text-xs leading-5 text-white/40">{item.kind} · {item.category === "link" ? "Outros links" : "Ferramentas"}</span>
@@ -116,7 +124,7 @@ function AccessGroup({ title, description, items, area, selectedIds, onRemove })
       </div>
       {items.length ? (
         <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {items.map((item) => <AppCard key={`${item.sourceAreaId || area.id}:${item.id}`} app={item} color={item.sourceColor || area.color} imported={Boolean(item.sourceAreaId && item.sourceAreaId !== area.id)} onRemove={() => onRemove(item.id)} />)}
+          {items.map((item) => <AppCard key={`${item.sourceAreaId || area.id}:${item.id}`} app={item} color={item.sourceColor || area.color} imported={Boolean(item.sourceAreaId && item.sourceAreaId !== area.id)} onRemove={() => onRemove(item.sourceAreaId || area.id, item.id)} />)}
         </div>
       ) : <div className="mt-4 rounded-xl border border-dashed border-white/10 p-6 text-sm text-white/30">Nenhum acesso selecionado neste grupo.</div>}
     </section>
@@ -138,22 +146,31 @@ export default function HubAreaView({ area }) {
     return () => { active = false; };
   }, []);
 
-  const selectedIds = selections[area.id] || [];
+  const areaSelection = normalizeAreaSelection(selections[area.id]);
+  const selectedIds = areaSelection.added;
+  const hiddenIds = areaSelection.hidden;
   const catalog = useMemo(() => catalogApps(), []);
   const imported = catalog.filter((item) => item.sourceAreaId !== area.id && selectedIds.includes(item.id));
-  const allItems = [...area.apps, ...imported];
+  const ownItems = area.apps.filter((item) => !hiddenIds.includes(item.id));
+  const allItems = [...ownItems, ...imported];
   const tools = allItems.filter((item) => item.category !== "link");
   const links = allItems.filter((item) => item.category === "link");
   const metrics = metricsForArea(area, summary);
 
-  function saveSelection(nextIds) {
-    const next = { ...selections, [area.id]: nextIds };
+  function saveSelection(nextAreaSelection) {
+    const next = { ...selections, [area.id]: nextAreaSelection };
     setSelections(next);
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
   }
 
-  function toggleItem(id) {
-    saveSelection(selectedIds.includes(id) ? selectedIds.filter((item) => item !== id) : [...selectedIds, id]);
+  function toggleItem(sourceAreaId, id) {
+    if (sourceAreaId === area.id) {
+      const hidden = hiddenIds.includes(id) ? hiddenIds.filter((item) => item !== id) : [...hiddenIds, id];
+      saveSelection({ added: selectedIds, hidden });
+      return;
+    }
+    const added = selectedIds.includes(id) ? selectedIds.filter((item) => item !== id) : [...selectedIds, id];
+    saveSelection({ added, hidden: hiddenIds });
   }
 
   return (
@@ -191,9 +208,9 @@ export default function HubAreaView({ area }) {
         <section className="mt-9 border-t border-white/[0.08] pt-7" aria-labelledby="access-title">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div><p className="text-[10px] font-black uppercase tracking-[.18em]" style={{ color: area.color }}>Acessos da area</p><h2 id="access-title" className="mt-1 text-2xl font-black">Ferramentas e outros links</h2><p className="mt-2 text-sm text-white/35">Itens proprios + {imported.length} {imported.length === 1 ? "selecionado" : "selecionados"} de outras areas.</p></div>
-            <button type="button" onClick={() => setLibraryOpen((open) => !open)} className="min-h-11 rounded-xl border px-4 text-sm font-black transition hover:-translate-y-0.5" style={{ color: area.color, borderColor: `${area.color}55`, background: `${area.color}10` }}>{libraryOpen ? "Fechar biblioteca" : "+ Adicionar de outras areas"}</button>
+            <button type="button" onClick={() => setLibraryOpen((open) => !open)} className="min-h-11 rounded-xl border px-4 text-sm font-black transition hover:-translate-y-0.5" style={{ color: area.color, borderColor: `${area.color}55`, background: `${area.color}10` }}>{libraryOpen ? "Fechar biblioteca" : "Gerenciar ferramentas e links"}</button>
           </div>
-          {libraryOpen && <LibraryPicker area={area} selectedIds={selectedIds} onToggle={toggleItem} onClose={() => setLibraryOpen(false)} />}
+          {libraryOpen && <LibraryPicker area={area} selectedIds={selectedIds} hiddenIds={hiddenIds} onToggle={toggleItem} onClose={() => setLibraryOpen(false)} />}
         </section>
 
         <AccessGroup title="Ferramentas" description="Dashboards, sistemas, fluxos e recursos operacionais." items={tools} area={area} selectedIds={selectedIds} onRemove={toggleItem} />
