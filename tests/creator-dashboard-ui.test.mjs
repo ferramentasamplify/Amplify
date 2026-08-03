@@ -96,15 +96,16 @@ test("mobile header does not let sticky navigation cover dashboard content", () 
   assert.match(source, /@media\(max-width:560px\)\{\.econ-topbar\{background:#070910;backdrop-filter:none\}\.creator-dashboard-nav\{position:relative;top:auto;margin-left:0;margin-right:0/)
 })
 
-test("exit chart uses blue points for exits and a red line for prior 30-day GMV", () => {
-  assert.match(source, /<Scatter yAxisId="people" dataKey="exits" name="Desvinculados · pontos" fill="#54D8E8"/)
+test("exit chart uses small translucent blue points and a red line for prior 30-day GMV", () => {
+  assert.match(source, /<Scatter yAxisId="people" zAxisId="exitDots" dataKey="exits" name="Desvinculados · pontos" fill="#54D8E8" fillOpacity={0\.72}/)
   assert.match(source, /dataKey="exitedGmvPrior30d" name="GMV previo 30d · linha" stroke="#FF647C"/)
+  assert.equal((source.match(/<ZAxis zAxisId="exitDots" range={\[18, 18\]} \/>/g) || []).length, 3)
   assert.doesNotMatch(source, /Desvinculados · barras|<Bar dataKey="exits"|<Area[^>]+dataKey="exitedGmvPrior30d"/)
 })
 
 test("lost GMV chart compares daily exits with the remaining affiliated base", () => {
   assert.match(source, /<section className="lost-gmv-share-section/)
-  assert.match(source, /<Scatter yAxisId="people" dataKey="exits" name="Desvinculados · pontos azuis" fill="#54D8E8"/)
+  assert.match(source, /<Scatter yAxisId="people" zAxisId="exitDots" dataKey="exits" name="Desvinculados · pontos azuis" fill="#54D8E8" fillOpacity={0\.72}/)
   assert.match(source, /dataKey="lostGmvPercentOfRemainingBase" name="Percentual de GMV 30d perdido" stroke="#FF647C"/)
   assert.match(source, /GMV previo 30d dos creators que sairam no dia/)
   assert.match(source, /GMV previo 30d da base que permaneceu vinculada no dia/)

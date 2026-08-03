@@ -2,7 +2,7 @@
 /* eslint-disable react-hooks/set-state-in-effect -- loading state is reset when the request identity changes */
 
 import { useEffect, useMemo, useState } from "react"
-import { Area, Bar, CartesianGrid, ComposedChart, Legend, Line, ReferenceLine, ResponsiveContainer, Scatter, Tooltip, XAxis, YAxis } from "recharts"
+import { Area, Bar, CartesianGrid, ComposedChart, Legend, Line, ReferenceLine, ResponsiveContainer, Scatter, Tooltip, XAxis, YAxis, ZAxis } from "recharts"
 import { deriveCreatorBaseHealth } from "../lib/creator-base-health.mjs"
 import { CREATOR_DASHBOARD_SECTIONS, filterDashboardRows, normalizeCreatorDashboardSection } from "../lib/creator-dashboard.mjs"
 
@@ -747,15 +747,16 @@ export default function CreatorEconomicsView() {
                 <XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#5E6678" tick={{ fontSize: 10 }} minTickGap={30} />
                 <YAxis yAxisId="people" stroke="#6B7180" tick={{ fontSize: 10 }} width={42} />
                 <YAxis yAxisId="gmv" orientation="right" tickFormatter={compactMoney} stroke="#A94D5E" tick={{ fontSize: 10 }} width={72} />
+                <ZAxis zAxisId="exitDots" range={[18, 18]} />
                 <Tooltip content={<MovementTooltip />} /><Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} />
                 {selectedExitDay.date && <ReferenceLine yAxisId="people" x={selectedExitDay.date} stroke="#F4F6FF" strokeOpacity={0.5} strokeDasharray="3 4" />}
-                <Scatter yAxisId="people" dataKey="exits" name="Desvinculados · pontos" fill="#54D8E8" cursor="pointer" />
+                <Scatter yAxisId="people" zAxisId="exitDots" dataKey="exits" name="Desvinculados · pontos" fill="#54D8E8" fillOpacity={0.72} cursor="pointer" />
                 <Line yAxisId="gmv" type="monotone" dataKey="exitedGmvPrior30d" name="GMV previo 30d · linha" stroke="#FF647C" strokeWidth={3} dot={false} activeDot={{ r: 5, cursor: "pointer" }} connectNulls={false} />
               </ComposedChart>
             </ResponsiveContainer>
           </div>}
           {exitChartView === "split" && <div className="movement-split-grid">
-            <article><header><span>Quantidade</span><h3>Desvinculados por dia</h3></header><div className="movement-split-chart"><ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 640, height: 300 }}><ComposedChart data={movementChartData} margin={{ top: 14, right: 8, left: -8, bottom: 0 }} onClick={(event) => { if (event?.activeLabel) setSelectedExitDate(event.activeLabel) }}><CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} /><XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#5E6678" tick={{ fontSize: 9 }} minTickGap={26} /><YAxis allowDecimals={false} stroke="#3F8E9A" tick={{ fontSize: 9 }} width={42} /><Tooltip content={<MovementTooltip />} />{selectedExitDay.date && <ReferenceLine x={selectedExitDay.date} stroke="#F4F6FF" strokeOpacity={0.45} strokeDasharray="3 4" />}<Scatter dataKey="exits" name="Desvinculados · pontos" fill="#54D8E8" cursor="pointer" /></ComposedChart></ResponsiveContainer></div></article>
+            <article><header><span>Quantidade</span><h3>Desvinculados por dia</h3></header><div className="movement-split-chart"><ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 640, height: 300 }}><ComposedChart data={movementChartData} margin={{ top: 14, right: 8, left: -8, bottom: 0 }} onClick={(event) => { if (event?.activeLabel) setSelectedExitDate(event.activeLabel) }}><CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} /><XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#5E6678" tick={{ fontSize: 9 }} minTickGap={26} /><YAxis allowDecimals={false} stroke="#3F8E9A" tick={{ fontSize: 9 }} width={42} /><ZAxis zAxisId="exitDots" range={[18, 18]} /><Tooltip content={<MovementTooltip />} />{selectedExitDay.date && <ReferenceLine x={selectedExitDay.date} stroke="#F4F6FF" strokeOpacity={0.45} strokeDasharray="3 4" />}<Scatter zAxisId="exitDots" dataKey="exits" name="Desvinculados · pontos" fill="#54D8E8" fillOpacity={0.72} cursor="pointer" /></ComposedChart></ResponsiveContainer></div></article>
             <article><header><span>Valor associado</span><h3>GMV previo 30d por saida</h3></header><div className="movement-split-chart"><ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 640, height: 300 }}><ComposedChart data={movementChartData} margin={{ top: 14, right: 8, left: 2, bottom: 0 }} onClick={(event) => { if (event?.activeLabel) setSelectedExitDate(event.activeLabel) }}><CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} /><XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#5E6678" tick={{ fontSize: 9 }} minTickGap={26} /><YAxis tickFormatter={compactMoney} stroke="#A94D5E" tick={{ fontSize: 9 }} width={66} /><Tooltip content={<MovementTooltip />} />{selectedExitDay.date && <ReferenceLine x={selectedExitDay.date} stroke="#F4F6FF" strokeOpacity={0.45} strokeDasharray="3 4" />}<Line type="monotone" dataKey="exitedGmvPrior30d" name="GMV previo 30d · linha" stroke="#FF647C" strokeWidth={3} dot={false} connectNulls={false} /></ComposedChart></ResponsiveContainer></div></article>
           </div>}
           {exitChartView === "ranking" && <div className="movement-ranking-grid">
@@ -790,9 +791,10 @@ export default function CreatorEconomicsView() {
                 <XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#5E6678" tick={{ fontSize: 10 }} minTickGap={32} />
                 <YAxis yAxisId="people" allowDecimals={false} stroke="#3F8E9A" tick={{ fontSize: 10 }} width={52} domain={[0, "dataMax + 10"]} />
                 <YAxis yAxisId="percent" orientation="right" tickFormatter={percent} stroke="#A94D5E" tick={{ fontSize: 10 }} width={58} domain={[0, "auto"]} />
+                <ZAxis zAxisId="exitDots" range={[18, 18]} />
                 <Tooltip content={<LostGmvShareTooltip />} />
                 <Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} />
-                <Scatter yAxisId="people" dataKey="exits" name="Desvinculados · pontos azuis" fill="#54D8E8" />
+                <Scatter yAxisId="people" zAxisId="exitDots" dataKey="exits" name="Desvinculados · pontos azuis" fill="#54D8E8" fillOpacity={0.72} />
                 <Line yAxisId="percent" type="monotone" dataKey="lostGmvPercentOfRemainingBase" name="Percentual de GMV 30d perdido" stroke="#FF647C" strokeWidth={3} dot={false} activeDot={{ r: 5 }} connectNulls={false} />
               </ComposedChart>
             </ResponsiveContainer>
