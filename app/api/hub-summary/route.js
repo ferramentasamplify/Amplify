@@ -119,9 +119,19 @@ async function indiqueSummary(origin) {
   }
 }
 
+async function missionControlOverview() {
+  try {
+    return await fetchJson('http://127.0.0.1:3016/api/executive-overview', 8000)
+  } catch {
+    return null
+  }
+}
+
 export async function GET(request) {
+  const missionControl = await missionControlOverview()
   return Response.json({
-    updatedAt: new Date().toISOString(),
+    updatedAt: missionControl?.updatedAt || new Date().toISOString(),
+    missionControl,
     meta: { ...HUB_FALLBACK.meta, fallback: true },
     indique: { ...HUB_FALLBACK.indique, fallback: true },
     club: { ...HUB_FALLBACK.club, fallback: true },
