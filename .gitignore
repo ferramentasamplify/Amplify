@@ -5,3 +5,5 @@ npm-debug.log*
 .env.local
 .canva-oauth-state.json
 .canva-token.json
+data/hub-registry.runtime.json
+data/hub-registry.runtime.json.*.tmp

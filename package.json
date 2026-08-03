@@ -9,7 +9,8 @@
     "lint": "eslint",
     "test:creator-business-unit": "node --test tests/creator-business-unit.test.mjs",
     "test:gamifications": "node scripts/test-gamifications.mjs",
-    "test:growth-funnels": "node --no-warnings --test tests/growth-funnel-tree.test.mjs tests/new-brand-funnel-events.test.mjs tests/new-brand-funnel-events-route.test.mjs tests/new-brand-funnel-ui.test.mjs"
+    "test:growth-funnels": "node --no-warnings --test tests/growth-funnel-tree.test.mjs tests/new-brand-funnel-events.test.mjs tests/new-brand-funnel-events-route.test.mjs tests/new-brand-funnel-ui.test.mjs",
+    "test:hub-registry": "node --no-warnings --test tests/hub-registry.test.mjs"
   },
   "dependencies": {
     "@notionhq/client": "^5.15.0",
