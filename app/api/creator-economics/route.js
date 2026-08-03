@@ -265,6 +265,14 @@ async function readPortfolioAnalytics(from, to) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(row.date || '') || !Number.isInteger(row.activeCreators) || row.activeCreators <= 0) {
       throw new Error(`transicao diaria invalida: ${row.date || 'sem data'}`)
     }
+    if (row.gmvWindowComplete) {
+      const exitedGmv = Number(row.exitedGmvPrior30d)
+      const remainingGmv = Number(row.remainingAffiliatedGmvPrior30d)
+      const expectedLostPercent = remainingGmv > 0 ? round(exitedGmv / remainingGmv * 100) : null
+      if (!Number.isFinite(exitedGmv) || !Number.isFinite(remainingGmv) || remainingGmv < 0 || row.lostGmvPercentOfRemainingBase !== expectedLostPercent) {
+        throw new Error(`percentual de GMV perdido invalido: ${row.date}`)
+      }
+    }
   }
   for (const row of monthly) {
     if (!/^\d{4}-\d{2}$/.test(row.month || '') || !Number.isFinite(row.totalGmv) || !Array.isArray(row.topCreators)) {
