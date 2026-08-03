@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
+import { Bar, ComposedChart, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import PartnerCenterDateSelector from "@/components/PartnerCenterDateSelector";
 import { tiktokProfileUrl } from "@/lib/tiktok-profile-url";
 
@@ -40,10 +40,35 @@ const healthDot = {
 const VIEW_TABS = [
   { id: "overview", label: "Resumo" },
   { id: "goals", label: "Meta agosto" },
+  { id: "daily", label: "GMV/dia" },
+  { id: "categories", label: "Categorias" },
   { id: "gmv", label: "GMV original" },
   { id: "health", label: "Saúde" },
   { id: "ranking", label: "Ranking" },
 ];
+const CLUB_MONTHLY_TARGET = 15500000;
+const CATEGORY_ORDER = ["Start", "Silver", "Gold", "Diamond", "Royal"];
+const CATEGORY_STYLES = {
+  Start: { color: "#7D8A9D", label: "Start" },
+  Silver: { color: "#AEB8C8", label: "Silver" },
+  Gold: { color: "#F6B84B", label: "Gold" },
+  Diamond: { color: "#62D8FF", label: "Diamond" },
+  Royal: { color: "#F43F5E", label: "Royal" },
+};
+const classifyByGmv = (gmv) => {
+  const value = Number(gmv || 0);
+  if (value >= 1000000) return "Royal";
+  if (value >= 100000) return "Diamond";
+  if (value >= 30000) return "Gold";
+  if (value >= 5000) return "Silver";
+  return "Start";
+};
+const daysBetweenInclusive = (from, to) => {
+  if (!from || !to) return 31;
+  const ms = Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`);
+  if (!Number.isFinite(ms)) return 31;
+  return Math.max(1, Math.floor(ms / 86400000) + 1);
+};
 
 /** Cavalinho animado — foto circular com bobbing idle e posição X animada */
 function Horse({ am, trackPositionPct, gmvTotal, position, isLeader }) {
@@ -148,6 +173,9 @@ export default function AmCentralView() {
   const [legacyChartMode, setLegacyChartMode] = useState("split");
   const [selectedAmDrill, setSelectedAmDrill] = useState("");
   const [activeView, setActiveView] = useState("overview");
+  const [dailyMetric, setDailyMetric] = useState("total");
+  const [dailyChartType, setDailyChartType] = useState("bar");
+  const [selectedCategories, setSelectedCategories] = useState(["Diamond", "Royal"]);
 
   async function load() {
     setError("");
@@ -226,14 +254,46 @@ export default function AmCentralView() {
   const chartData = (timeline.points || []).map((point) => {
     const row = { date: point.date, label: fmtDate(point.date) };
     let total = 0;
+    let liveGmv = 0;
+    let videoGmv = 0;
+    let directGmv = 0;
     for (const r of ranking) {
       const value = Number(point.am?.[r.am.slug] || 0);
       row[r.am.slug] = value;
       total += value;
+      liveGmv += Number(point.amChannels?.[r.am.slug]?.liveGmv || 0);
+      videoGmv += Number(point.amChannels?.[r.am.slug]?.videoGmv || 0);
+      directGmv += Number(point.amChannels?.[r.am.slug]?.directGmv || 0);
     }
     row.total = total;
+    row.liveGmv = liveGmv;
+    row.videoGmv = videoGmv;
+    row.directGmv = directGmv;
     return row;
   });
+  let previousDaily = { total: 0, liveGmv: 0, videoGmv: 0 };
+  const dailyTarget = CLUB_MONTHLY_TARGET / daysBetweenInclusive(goals.period?.from, goals.period?.to);
+  const dailyChartData = chartData.map((point) => {
+    const row = {
+      ...point,
+      dailyTotal: Math.max(0, Number(point.total || 0) - previousDaily.total),
+      dailyLiveGmv: Math.max(0, Number(point.liveGmv || 0) - previousDaily.liveGmv),
+      dailyVideoGmv: Math.max(0, Number(point.videoGmv || 0) - previousDaily.videoGmv),
+      dailyTarget,
+    };
+    previousDaily = {
+      total: Number(point.total || 0),
+      liveGmv: Number(point.liveGmv || 0),
+      videoGmv: Number(point.videoGmv || 0),
+    };
+    return row;
+  });
+  const dailyMetricMap = {
+    total: { key: "dailyTotal", label: "GMV total", color: "#25F4EE" },
+    live: { key: "dailyLiveGmv", label: "GMV live", color: "#10b981" },
+    video: { key: "dailyVideoGmv", label: "GMV vídeo", color: "#f59e0b" },
+  };
+  const activeDailyMetric = dailyMetricMap[dailyMetric] || dailyMetricMap.total;
   const goalChartData = (goalTimeline.points || []).map((point) => {
     const row = { ...point, label: fmtDate(point.date) };
     if (selectedAmDrill) {
@@ -244,6 +304,23 @@ export default function AmCentralView() {
   });
   const selectedRanking = ranking.find((item) => item.am.slug === selectedAmDrill);
   const drillCreators = selectedRanking?.creators?.slice(0, 12) || [];
+  const allCreators = ranking.flatMap((item) =>
+    (item.creators || []).map((creator) => ({ ...creator, am: item.am })),
+  );
+  const categoryPanels = CATEGORY_ORDER.map((category) => {
+    const creators = allCreators
+      .filter((creator) => classifyByGmv(creator.gmv) === category)
+      .sort((a, b) => Number(b.gmv || 0) - Number(a.gmv || 0));
+    return {
+      category,
+      creators,
+      totalGmv: creators.reduce((acc, creator) => acc + Number(creator.gmv || 0), 0),
+      liveGmv: creators.reduce((acc, creator) => acc + Number(creator.liveGmv || 0), 0),
+      videoGmv: creators.reduce((acc, creator) => acc + Number(creator.videoGmv || 0), 0),
+      active: creators.filter((creator) => Number(creator.gmv || 0) > 0).length,
+    };
+  });
+  const visibleCategoryPanels = categoryPanels.filter((panel) => selectedCategories.includes(panel.category));
   const sourceBadges = [
     {
       label: sourceStatus.sales?.ok === false ? "GMV degradado" : "GMV OK",
@@ -367,7 +444,7 @@ export default function AmCentralView() {
           </div>
 
           <div className="rounded-2xl border border-white/10 bg-[#14161F] p-2">
-            <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
+            <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-7">
               {VIEW_TABS.map((view) => (
                 <button
                   key={view.id}
@@ -535,6 +612,187 @@ export default function AmCentralView() {
                   )}
                 </LineChart>
               </ResponsiveContainer>
+            </div>
+          </section>
+          )}
+
+          {activeView === "daily" && (
+          <section className="bg-[#14161F] border border-white/10 rounded-3xl p-5 sm:p-6">
+            <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 mb-5">
+              <div>
+                <div className="text-[10px] font-mono uppercase tracking-widest text-white/40">
+                  Ritmo diário do mês
+                </div>
+                <h2 className="mt-1 text-xl font-black">GMV/dia vs meta do Club</h2>
+                <p className="mt-1 text-xs text-white/40">
+                  Meta mensal: {fmtBRL(CLUB_MONTHLY_TARGET)} · necessário por dia: {fmtBRL(dailyTarget)}.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(dailyMetricMap).map(([key, item]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setDailyMetric(key)}
+                    className={`rounded-lg border px-3 py-2 text-xs font-bold ${
+                      dailyMetric === key ? "border-white bg-white text-black" : "border-white/10 bg-white/5 text-white/60 hover:text-white"
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+                {[
+                  ["bar", "Coluna"],
+                  ["line", "Linha"],
+                ].map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setDailyChartType(key)}
+                    className={`rounded-lg border px-3 py-2 text-xs font-bold ${
+                      dailyChartType === key ? "border-white bg-white text-black" : "border-white/10 bg-white/5 text-white/60 hover:text-white"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-3 mb-5">
+              <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                <div className="text-[10px] font-mono uppercase tracking-widest text-white/35">Meta por dia</div>
+                <div className="mt-1 text-2xl font-black text-white">{fmtBRL(dailyTarget)}</div>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                <div className="text-[10px] font-mono uppercase tracking-widest text-white/35">Último dia</div>
+                <div className="mt-1 text-2xl font-black" style={{ color: activeDailyMetric.color }}>
+                  {fmtBRL(dailyChartData.at(-1)?.[activeDailyMetric.key])}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                <div className="text-[10px] font-mono uppercase tracking-widest text-white/35">Gap do último dia</div>
+                <div className="mt-1 text-2xl font-black text-amber-200">
+                  {fmtBRL(Math.max(0, dailyTarget - Number(dailyChartData.at(-1)?.[activeDailyMetric.key] || 0)))}
+                </div>
+              </div>
+            </div>
+
+            <div className="h-[340px]">
+              <ResponsiveContainer width="100%" height="100%">
+                {dailyChartType === "line" ? (
+                  <LineChart data={dailyChartData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                    <CartesianGrid stroke="rgba(255,255,255,0.07)" vertical={false} />
+                    <XAxis dataKey="label" tick={{ fill: "rgba(255,255,255,0.45)", fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={22} />
+                    <YAxis tick={{ fill: "rgba(255,255,255,0.45)", fontSize: 10 }} tickLine={false} axisLine={false} width={76} tickFormatter={fmtShortBRL} />
+                    <Tooltip contentStyle={{ background: "#0A0B12", border: "1px solid rgba(255,255,255,0.14)", borderRadius: 8, color: "#fff" }} labelStyle={{ color: "rgba(255,255,255,0.55)" }} formatter={(value, name) => [fmtBRL(value), name === "dailyTarget" ? "Meta/dia" : activeDailyMetric.label]} />
+                    <Line type="monotone" dataKey="dailyTarget" name="dailyTarget" stroke="#f43f5e" strokeWidth={2} strokeDasharray="6 6" dot={false} />
+                    <Line type="monotone" dataKey={activeDailyMetric.key} name={activeDailyMetric.label} stroke={activeDailyMetric.color} strokeWidth={3} dot={false} activeDot={{ r: 4 }} />
+                  </LineChart>
+                ) : (
+                  <ComposedChart data={dailyChartData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                    <CartesianGrid stroke="rgba(255,255,255,0.07)" vertical={false} />
+                    <XAxis dataKey="label" tick={{ fill: "rgba(255,255,255,0.45)", fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={22} />
+                    <YAxis tick={{ fill: "rgba(255,255,255,0.45)", fontSize: 10 }} tickLine={false} axisLine={false} width={76} tickFormatter={fmtShortBRL} />
+                    <Tooltip contentStyle={{ background: "#0A0B12", border: "1px solid rgba(255,255,255,0.14)", borderRadius: 8, color: "#fff" }} labelStyle={{ color: "rgba(255,255,255,0.55)" }} formatter={(value, name) => [fmtBRL(value), name === "dailyTarget" ? "Meta/dia" : activeDailyMetric.label]} />
+                    <Bar dataKey={activeDailyMetric.key} name={activeDailyMetric.label} fill={activeDailyMetric.color} radius={[6, 6, 0, 0]} />
+                    <Line type="monotone" dataKey="dailyTarget" name="dailyTarget" stroke="#f43f5e" strokeWidth={2} strokeDasharray="6 6" dot={false} />
+                  </ComposedChart>
+                )}
+              </ResponsiveContainer>
+            </div>
+          </section>
+          )}
+
+          {activeView === "categories" && (
+          <section className="bg-[#14161F] border border-white/10 rounded-3xl p-5 sm:p-6">
+            <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+              <div>
+                <div className="text-[10px] font-mono uppercase tracking-widest text-white/40">
+                  Club por categoria
+                </div>
+                <h2 className="mt-1 text-xl font-black">Start, Silver, Gold, Diamond e Royal</h2>
+                <p className="mt-1 text-xs text-white/40">
+                  Categorias calculadas pelo GMV do período selecionado. A lista detalhada de creators aparece para Diamond e Royal.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {CATEGORY_ORDER.map((category) => {
+                  const active = selectedCategories.includes(category);
+                  const style = CATEGORY_STYLES[category];
+                  const count = categoryPanels.find((panel) => panel.category === category)?.creators.length || 0;
+                  return (
+                    <label
+                      key={category}
+                      className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-xs font-bold ${
+                        active ? "border-white/25 bg-white/10 text-white" : "border-white/10 bg-white/5 text-white/50"
+                      }`}
+                      style={{ color: active ? style.color : undefined }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={active}
+                        onChange={() =>
+                          setSelectedCategories((current) =>
+                            current.includes(category)
+                              ? current.filter((item) => item !== category)
+                              : [...current, category],
+                          )
+                        }
+                        className="accent-[#25F4EE]"
+                      />
+                      {category} <span className="font-mono text-white/40">{count}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-2">
+              {visibleCategoryPanels.map((panel) => {
+                const style = CATEGORY_STYLES[panel.category];
+                const showCreators = ["Diamond", "Royal"].includes(panel.category);
+                return (
+                  <div key={panel.category} className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-[10px] font-mono uppercase tracking-widest text-white/35">Categoria</div>
+                        <h3 className="mt-1 text-xl font-black" style={{ color: style.color }}>{panel.category}</h3>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-2xl font-black text-white">{panel.creators.length}</div>
+                        <div className="text-[11px] text-white/40">creators</div>
+                      </div>
+                    </div>
+                    <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
+                      <div className="rounded-xl bg-white/[0.04] p-3"><span className="text-white/35">GMV</span><b className="mt-1 block font-mono text-white">{fmtShortBRL(panel.totalGmv)}</b></div>
+                      <div className="rounded-xl bg-white/[0.04] p-3"><span className="text-white/35">Ativos</span><b className="mt-1 block font-mono text-white">{panel.active}</b></div>
+                      <div className="rounded-xl bg-white/[0.04] p-3"><span className="text-white/35">Live</span><b className="mt-1 block font-mono text-white">{fmtShortBRL(panel.liveGmv)}</b></div>
+                      <div className="rounded-xl bg-white/[0.04] p-3"><span className="text-white/35">Vídeo</span><b className="mt-1 block font-mono text-white">{fmtShortBRL(panel.videoGmv)}</b></div>
+                    </div>
+                    {showCreators && (
+                      <div className="mt-4 space-y-2">
+                        {panel.creators.slice(0, 8).map((creator) => (
+                          <Link
+                            key={`${panel.category}-${creator.handle}`}
+                            href={`/club/am/${creator.am.slug}/creator/${encodeURIComponent(creator.handle)}`}
+                            className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-xs hover:border-white/25"
+                          >
+                            <span className="min-w-0 truncate font-bold text-white">@{creator.handle}</span>
+                            <span className="font-mono text-white/70">{fmtShortBRL(creator.gmv)}</span>
+                          </Link>
+                        ))}
+                        {panel.creators.length === 0 && <div className="text-xs text-white/35">Sem creators nesta categoria no período.</div>}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              {visibleCategoryPanels.length === 0 && (
+                <div className="rounded-2xl border border-dashed border-white/10 p-8 text-sm text-white/40">
+                  Selecione pelo menos uma categoria para visualizar.
+                </div>
+              )}
             </div>
           </section>
           )}

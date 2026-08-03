@@ -155,6 +155,21 @@ function buildGmvTimeline({ from, to, carteirasPorAm, creatorsByHandle }) {
         handles.reduce((sum, handle) => sum + Number(point.creators?.[handle] || 0), 0),
       ]),
     ),
+    amChannels: Object.fromEntries(
+      Object.entries(carteirasPorAm).map(([amSlug, handles]) => [
+        amSlug,
+        handles.reduce(
+          (acc, handle) => {
+            const channels = point.creatorChannels?.[handle] || {};
+            acc.liveGmv += Number(channels.liveGmv || 0);
+            acc.videoGmv += Number(channels.videoGmv || 0);
+            acc.directGmv += Number(channels.directGmv || 0);
+            return acc;
+          },
+          { liveGmv: 0, videoGmv: 0, directGmv: 0 },
+        ),
+      ]),
+    ),
   }));
   return {
     mode: timeline.mode,

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
+import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import PartnerCenterDateSelector from "@/components/PartnerCenterDateSelector";
 import { tiktokProfileUrl } from "@/lib/tiktok-profile-url";
 
@@ -43,6 +43,26 @@ function EmptyState({ children }) {
   return <div className="border border-dashed border-white/10 p-5 text-sm text-white/35">{children}</div>;
 }
 
+function ChartTypeToggle({ value, onChange }) {
+  return (
+    <div className="inline-flex rounded-lg border border-white/10 bg-black/20 p-1">
+      {[
+        ["line", "Linha"],
+        ["bar", "Coluna"],
+      ].map(([id, label]) => (
+        <button
+          key={id}
+          type="button"
+          onClick={() => onChange(id)}
+          className={`rounded-md px-3 py-1.5 text-xs font-bold ${value === id ? "bg-white text-black" : "text-white/55 hover:bg-white/5 hover:text-white"}`}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export default function CreatorProfileView({ slug, handle }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -52,6 +72,8 @@ export default function CreatorProfileView({ slug, handle }) {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState(todayISO());
   const [applied, setApplied] = useState({ from: "", to: todayISO() });
+  const [activeDataView, setActiveDataView] = useState("rolling30");
+  const [chartType, setChartType] = useState("line");
 
   async function load() {
     setLoading(true);
@@ -98,15 +120,37 @@ export default function CreatorProfileView({ slug, handle }) {
   const gamifications = data?.gamifications?.items || [];
   const channelTotal = Number(metrics.gmv || 0);
   const tiktokUrl = tiktokProfileUrl(creator.handle || handle);
-  const timelineData = (data?.timeline?.points || []).map((point) => ({
-    ...point,
-    label: fmtDate(point.date),
-  }));
+  let previousGmv = 0;
+  const timelineData = (data?.timeline?.points || []).map((point) => {
+    const gmv = Number(point.gmv || 0);
+    const row = {
+      ...point,
+      label: fmtDate(point.date),
+      dailyGmv: Math.max(0, gmv - previousGmv),
+    };
+    previousGmv = gmv;
+    return row;
+  });
   const rolling30Data = (data?.rolling30Timeline?.points || []).map((point) => ({
     ...point,
     label: fmtDate(point.date),
   }));
   const lifecycle = data?.lifecycle || {};
+  const lifecycleRows = [
+    {
+      key: "joinedAt",
+      label: "Entrada",
+      value: lifecycle.joinedAt,
+      hint: lifecycle.joinedAtInferred
+        ? "Data inferida pela primeira cobertura válida que temos no Partner Center. O creator pode ter entrado antes; o painel usa essa data para não deixar o vínculo em branco."
+        : "",
+    },
+    { key: "leftAt", label: "Saída", value: lifecycle.leftAt },
+    { key: "returnedAt", label: "Retorno", value: lifecycle.returnedAt },
+  ].filter((row) => row.key === "joinedAt" || row.value);
+  const activeChartData = activeDataView === "daily" ? timelineData : rolling30Data;
+  const activeChartKey = activeDataView === "daily" ? "dailyGmv" : "rolling30Gmv";
+  const activeChartLabel = activeDataView === "daily" ? "GMV/dia" : "GMV móvel 30d";
   const rollingFirst = Number(rolling30Data[0]?.rolling30Gmv || 0);
   const rollingLast = Number(rolling30Data.at(-1)?.rolling30Gmv || 0);
   const rollingDeltaPct = rollingFirst > 0 ? ((rollingLast - rollingFirst) / rollingFirst) * 100 : rollingLast > 0 ? 100 : 0;
@@ -188,33 +232,55 @@ export default function CreatorProfileView({ slug, handle }) {
           <div className="border border-white/10 bg-[#14161F] p-5">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
-                <p className="text-[10px] font-mono uppercase tracking-widest text-white/40">GMV móvel</p>
-                <h2 className="mt-1 text-xl font-black">Últimos 30 dias por ponto</h2>
+                <p className="text-[10px] font-mono uppercase tracking-widest text-white/40">Views de análise</p>
+                <h2 className="mt-1 text-xl font-black">{activeDataView === "daily" ? "GMV por dia" : "Últimos 30 dias por ponto"}</h2>
                 <p className="mt-1 text-xs text-white/40">
-                  Cada dia mostra a soma dos 30 dias anteriores para separar constância de pico isolado.
+                  {activeDataView === "daily"
+                    ? "Cada ponto mostra o GMV realizado no dia dentro do período selecionado."
+                    : "Cada dia mostra a soma dos 30 dias anteriores para separar constância de pico isolado."}
                 </p>
               </div>
-              <div className="text-right">
-                <div className="text-2xl font-black" style={{ color: consistencyTone }}>{fmtBRL(rollingLast)}</div>
-                <div className="text-[11px] text-white/40">{fmtPct(rollingDeltaPct)} vs início da janela</div>
+              <div className="flex flex-wrap justify-end gap-2">
+                <div className="inline-flex rounded-lg border border-white/10 bg-black/20 p-1">
+                  {[
+                    ["rolling30", "GMV 30d"],
+                    ["daily", "GMV/dia"],
+                  ].map(([id, label]) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => setActiveDataView(id)}
+                      className={`rounded-md px-3 py-1.5 text-xs font-bold ${activeDataView === id ? "bg-white text-black" : "text-white/55 hover:bg-white/5 hover:text-white"}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <ChartTypeToggle value={chartType} onChange={setChartType} />
               </div>
             </div>
             <div className="mt-5 h-[260px]">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={rolling30Data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-                  <CartesianGrid stroke="rgba(255,255,255,0.07)" vertical={false} />
-                  <XAxis dataKey="label" tick={{ fill: "rgba(255,255,255,0.45)", fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={22} />
-                  <YAxis tick={{ fill: "rgba(255,255,255,0.45)", fontSize: 10 }} tickLine={false} axisLine={false} width={70} tickFormatter={fmtShortBRL} />
-                  <Tooltip
-                    contentStyle={{ background: "#0A0B12", border: "1px solid rgba(255,255,255,0.14)", borderRadius: 8, color: "#fff" }}
-                    labelStyle={{ color: "rgba(255,255,255,0.55)" }}
-                    formatter={(value) => [fmtBRL(value), "GMV móvel 30d"]}
-                  />
-                  <Line type="monotone" dataKey="rolling30Gmv" stroke={consistencyTone} strokeWidth={3} dot={false} activeDot={{ r: 4 }} />
-                </LineChart>
+                {chartType === "bar" ? (
+                  <BarChart data={activeChartData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                    <CartesianGrid stroke="rgba(255,255,255,0.07)" vertical={false} />
+                    <XAxis dataKey="label" tick={{ fill: "rgba(255,255,255,0.45)", fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={22} />
+                    <YAxis tick={{ fill: "rgba(255,255,255,0.45)", fontSize: 10 }} tickLine={false} axisLine={false} width={70} tickFormatter={fmtShortBRL} />
+                    <Tooltip contentStyle={{ background: "#0A0B12", border: "1px solid rgba(255,255,255,0.14)", borderRadius: 8, color: "#fff" }} labelStyle={{ color: "rgba(255,255,255,0.55)" }} formatter={(value) => [fmtBRL(value), activeChartLabel]} />
+                    <Bar dataKey={activeChartKey} name={activeChartLabel} fill={activeDataView === "daily" ? "#25F4EE" : consistencyTone} radius={[6, 6, 0, 0]} />
+                  </BarChart>
+                ) : (
+                  <LineChart data={activeChartData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                    <CartesianGrid stroke="rgba(255,255,255,0.07)" vertical={false} />
+                    <XAxis dataKey="label" tick={{ fill: "rgba(255,255,255,0.45)", fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={22} />
+                    <YAxis tick={{ fill: "rgba(255,255,255,0.45)", fontSize: 10 }} tickLine={false} axisLine={false} width={70} tickFormatter={fmtShortBRL} />
+                    <Tooltip contentStyle={{ background: "#0A0B12", border: "1px solid rgba(255,255,255,0.14)", borderRadius: 8, color: "#fff" }} labelStyle={{ color: "rgba(255,255,255,0.55)" }} formatter={(value) => [fmtBRL(value), activeChartLabel]} />
+                    <Line type="monotone" dataKey={activeChartKey} name={activeChartLabel} stroke={activeDataView === "daily" ? "#25F4EE" : consistencyTone} strokeWidth={3} dot={false} activeDot={{ r: 4 }} />
+                  </LineChart>
+                )}
               </ResponsiveContainer>
             </div>
-            <div className="mt-4">
+            {activeDataView === "rolling30" && <div className="mt-4">
               <div className="mb-2 flex items-center justify-between text-xs">
                 <b className="text-white/70">Corrida de consistência</b>
                 <span className="font-mono text-white/45">{Math.round(consistencyPct)}%</span>
@@ -225,16 +291,25 @@ export default function CreatorProfileView({ slug, handle }) {
               <p className="mt-2 text-xs text-white/35">
                 Verde quando o GMV móvel cresce; laranja quando estabiliza; vermelho quando a janela perde força.
               </p>
-            </div>
+            </div>}
           </div>
 
           <div className="border border-white/10 bg-[#14161F] p-5">
             <p className="text-[10px] font-mono uppercase tracking-widest text-white/40">Vínculo</p>
             <h2 className="mt-1 text-xl font-black">Saída e retorno</h2>
             <div className="mt-4 space-y-3 text-sm">
-              <div className="flex justify-between gap-4 border-b border-white/5 pb-2"><span className="text-white/40">Entrada</span><b>{fmtDate(lifecycle.joinedAt)}</b></div>
-              <div className="flex justify-between gap-4 border-b border-white/5 pb-2"><span className="text-white/40">Saída</span><b>{fmtDate(lifecycle.leftAt)}</b></div>
-              <div className="flex justify-between gap-4 border-b border-white/5 pb-2"><span className="text-white/40">Retorno</span><b>{fmtDate(lifecycle.returnedAt)}</b></div>
+              {lifecycleRows.map((row) => (
+                <div key={row.key} className="flex justify-between gap-4 border-b border-white/5 pb-2">
+                  <span className="flex items-center gap-1 text-white/40">
+                    {row.label}
+                    {row.hint && <span title={row.hint} className="grid h-4 w-4 place-items-center rounded-full border border-white/15 text-[10px] font-black text-white/55">i</span>}
+                  </span>
+                  <b>{fmtDate(row.value)}</b>
+                </div>
+              ))}
+              {!lifecycle.leftAt && !lifecycle.returnedAt && (
+                <div className="border-b border-white/5 pb-2 text-xs text-white/40">Não houve saída nem retorno registrado para este creator.</div>
+              )}
               <div className="flex justify-between gap-4 border-b border-white/5 pb-2"><span className="text-white/40">Dias vinculado</span><b>{lifecycle.linkedDays === null || lifecycle.linkedDays === undefined ? "—" : `${fmtInt(lifecycle.linkedDays)} dias`}</b></div>
               <div className="flex justify-between gap-4"><span className="text-white/40">Sinal</span><b>{lifecycle.hasReturned ? "Reativado" : lifecycle.hasChurned ? "Churn" : "Ativo/sem saída"}</b></div>
             </div>

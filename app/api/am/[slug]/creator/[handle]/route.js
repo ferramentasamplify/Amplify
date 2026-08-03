@@ -224,9 +224,9 @@ function buildCreatorTimeline({ from, to, previousFrom, previousTo, handle }) {
       gmv: Number(point.creators?.[handle] || 0),
       previousGmv: Number(previousPoint.creators?.[handle] || 0),
       orders: 0,
-      liveGmv: 0,
-      videoGmv: 0,
-      directGmv: 0,
+      liveGmv: Number(point.creatorChannels?.[handle]?.liveGmv || 0),
+      videoGmv: Number(point.creatorChannels?.[handle]?.videoGmv || 0),
+      directGmv: Number(point.creatorChannels?.[handle]?.directGmv || 0),
       status: point.status,
       source: point.source,
     };
@@ -269,14 +269,16 @@ function buildRolling30Timeline({ from, to, handle }) {
   };
 }
 
-function buildLifecycle(creator, coverageTo) {
+function buildLifecycle(creator, coverage) {
   const raw = creator?.lifecycle || {};
-  const joinedAt = raw.joinedAt || null;
+  const inferredJoinedAt = !raw.joinedAt && coverage?.from ? coverage.from : null;
+  const joinedAt = raw.joinedAt || inferredJoinedAt;
   const leftAt = raw.leftAt || null;
   const returnedAt = raw.returnedAt || null;
-  const linkedUntil = leftAt || coverageTo || new Date().toISOString().slice(0, 10);
+  const linkedUntil = leftAt || coverage?.to || new Date().toISOString().slice(0, 10);
   return {
     joinedAt,
+    joinedAtInferred: Boolean(inferredJoinedAt),
     leftAt,
     returnedAt,
     status: raw.status || null,
@@ -284,7 +286,11 @@ function buildLifecycle(creator, coverageTo) {
     hasReturned: Boolean(leftAt && returnedAt),
     linkedDays: joinedAt ? daysBetweenISO(joinedAt, linkedUntil) + 1 : null,
     inactiveDaysBeforeReturn: leftAt && returnedAt ? daysBetweenISO(leftAt, returnedAt) : null,
-    source: joinedAt || leftAt || returnedAt ? "notion_creator_profile" : "notion_fields_missing",
+    source: raw.joinedAt || leftAt || returnedAt
+      ? "notion_creator_profile"
+      : inferredJoinedAt
+        ? "partner_center_first_valid_coverage"
+        : "notion_fields_missing",
   };
 }
 
@@ -333,7 +339,7 @@ export async function GET(req, { params }) {
       to: salesSnapshot.coverage?.to || toDate,
       handle,
     });
-    const lifecycle = buildLifecycle(creator, salesSnapshot.coverage?.to || toDate);
+    const lifecycle = buildLifecycle(creator, salesSnapshot.coverage || { from: fromDate, to: toDate });
     const primaryWarnings = [...new Set([
       ...(salesSnapshot.warnings || []),
       ...(timeline.warnings || []),
