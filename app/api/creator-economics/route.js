@@ -309,7 +309,8 @@ async function readPortfolioAnalytics(from, to) {
 
 async function readCreatorActualCosts(request, from, to) {
   try {
-    const endpoint = new URL('/api/gastos', request.url)
+    const internalOrigin = process.env.PORT ? `http://127.0.0.1:${process.env.PORT}` : new URL(request.url).origin
+    const endpoint = new URL('/api/gastos', internalOrigin)
     endpoint.searchParams.set('from', `${from}-01`)
     endpoint.searchParams.set('to', lastDay(to))
     const response = await fetch(endpoint, { cache: 'no-store', signal: AbortSignal.timeout(20_000) })
