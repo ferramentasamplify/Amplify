@@ -122,6 +122,7 @@ export default function CreatorEconomicsView() {
   const [portfolioMonth, setPortfolioMonth] = useState("2026-07")
   const [tierTransitionMonth, setTierTransitionMonth] = useState("2026-07")
   const [movementWindow, setMovementWindow] = useState("30")
+  const [businessUnitMonth, setBusinessUnitMonth] = useState("")
   const [portfolioForecastScenario, setPortfolioForecastScenario] = useState("moving7d")
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -243,11 +244,17 @@ export default function CreatorEconomicsView() {
   const profitability = data?.profitability || {}
   const profitSummary = profitability.summary || {}
   const originProfitability = profitability.byOrigin || []
+  const retention = data?.retentionAnalytics || {}
+  const creatorBusinessUnit = data?.creatorBusinessUnit || {}
+  const businessUnitActuals = creatorBusinessUnit.actuals || {}
+  const businessUnitMonths = businessUnitActuals.monthly || []
+  const selectedBusinessUnitMonth = businessUnitMonths.find((item) => item.month === businessUnitMonth) || businessUnitMonths.at(-1) || {}
+  const q3PlanMonths = creatorBusinessUnit.plan?.months || []
   const showPaid = source === "all" || source === "paid-meta"
 
   return <main className="economics-page">
     <nav className="econ-topbar">
-      <a href="/hub" className="econ-brand"><b>A</b><span>Amplify UGC</span><small>/ economia creator</small></a>
+      <a href="/hub" className="econ-brand"><b>A</b><span>Amplify UGC</span><small>/ business unit creators</small></a>
       <a href="/hub" className="econ-back">← Hub de Dashboards</a>
     </nav>
 
@@ -255,7 +262,7 @@ export default function CreatorEconomicsView() {
       <header className="econ-hero">
         <div>
           <span className="econ-kicker"><i /> Unit economics conectado</span>
-          <h1>CAC encontra<br /><em>LTV real.</em></h1>
+          <h1>Analise Business Unit Creators</h1>
           <p>Da origem de aquisicao ao GMV diario do Partner Center. Cada creator e unido pelo @ e pelo historico de aliases — sem misturar snapshot acumulado com receita nova.</p>
         </div>
         <div className="hero-formula">
@@ -730,6 +737,69 @@ export default function CreatorEconomicsView() {
           <footer><span><b>Saldo 30d:</b> entradas observadas menos saidas observadas entre D-29 e D.</span><span>Acima de zero = expansao; abaixo de zero = contracao.</span><em>Entradas incluem primeira aparicao e retornos, para reconciliar exatamente a variacao do estoque ativo.</em></footer>
         </section>
 
+        <section className="retention-analytics-section">
+          <header className="retention-analytics-head">
+            <div><span className="affiliation-kicker">Retencao observada</span><h2>Quanto tempo levamos para perder um creator?</h2><p>Duracao dos ciclos que terminaram em uma saida observada, com retorno posterior e GMV previo associado.</p></div>
+            <div className="retention-censor"><span>Amostra encerrada</span><strong>{integer(retention.summary?.exitEventsWithDuration)} saidas</strong><small>Creators ainda presentes estao censurados e nao entram na media.</small></div>
+          </header>
+          <div className="retention-summary-grid">
+            <div><span>Tempo medio ate saida</span><strong>{retention.summary?.meanDaysToExit == null ? "—" : `${decimal(retention.summary.meanDaysToExit)} dias`}</strong><small>{integer(retention.summary?.exitEventsWithDuration)} ciclos completos</small></div>
+            <div><span>Mediana ate saida</span><strong>{retention.summary?.medianDaysToExit == null ? "—" : `${decimal(retention.summary.medianDaysToExit)} dias`}</strong><small>menos sensivel a extremos</small></div>
+            <div><span>Creators unicos que sairam</span><strong>{integer(retention.summary?.uniqueExitedCreators)}</strong><small>author_id unicos na janela</small></div>
+            <div><span>Sairam e voltaram depois</span><strong>{retention.summary?.laterReturnPercent == null ? "—" : percent(retention.summary.laterReturnPercent)}</strong><small>{integer(retention.summary?.uniqueExitedCreatorsWithLaterReturn)} creators com retorno posterior</small></div>
+          </div>
+          <div className="retention-analytics-grid">
+            <article>
+              <header><span>Tempo medio por categoria</span><small>Amostra de eventos encerrados</small></header>
+              <div className="retention-tier-list">{(retention.byTier || []).map((item) => <div key={item.key}><span>{item.label}</span><strong>{decimal(item.meanDaysToExit)} dias</strong><small>mediana {decimal(item.medianDaysToExit)} · n={integer(item.exitEvents)}</small></div>)}</div>
+            </article>
+            <article>
+              <header><span>GMV previo 30d nas saidas por mes</span><small>Soma dos eventos de saida observados</small></header>
+              <div className="retention-month-list">{(retention.monthly || []).map((item) => <div key={item.month}><span>{monthLabel(item.month)}</span><strong>{money(item.exitedGmvPrior30d)}</strong><small>{item.completeWindow ? `${integer(item.completeTransitionDays)} dias com janela completa` : `janela parcial · ${integer(item.completeTransitionDays)}/${integer(item.observedTransitionDays)} dias completos`}</small></div>)}</div>
+            </article>
+          </div>
+          <footer><span>{retention.methodology}</span><b>{retention.caveat}</b></footer>
+        </section>
+
+        <section className="creator-bu-section">
+          <header className="creator-bu-head">
+            <div><span className="profit-kicker">Business Unit Creators</span><h2>Ganho mensal versus gasto mensal</h2><p>Receita do ledger, despesas observadas no Notion e a premissa explicita de salarios da retencao. Clique em um mes e abra cada categoria para auditar as linhas.</p></div>
+            <div className={`creator-bu-status ${businessUnitActuals.status || "unavailable"}`}><span>{businessUnitActuals.status === "observed" ? "Notion conectado + premissa" : "Notion indisponivel · premissa ativa"}</span><strong>{businessUnitActuals.status === "observed" ? `${integer(businessUnitActuals.fetchedRows)} linhas lidas` : "Resultado parcial"}</strong><small>{businessUnitActuals.error || businessUnitActuals.source}</small></div>
+          </header>
+          <div className="creator-bu-chart">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 1180, height: 340 }}>
+              <ComposedChart data={businessUnitMonths} margin={{ top: 20, right: 12, left: 4, bottom: 0 }}>
+                <CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} />
+                <XAxis dataKey="month" tickFormatter={monthLabel} stroke="#596273" tick={{ fontSize: 10 }} />
+                <YAxis tickFormatter={compactMoney} stroke="#627064" tick={{ fontSize: 10 }} width={72} />
+                <Tooltip content={<ProfitabilityTooltip />} />
+                <Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} />
+                <Bar dataKey="revenue" name="Ganho mensal" fill="#7165D6" radius={[5, 5, 0, 0]} />
+                <Bar dataKey="consideredCost" name="Gasto mensal considerado" fill="#C48A30" radius={[5, 5, 0, 0]} />
+                <Line type="monotone" dataKey="consideredResult" name="Resultado considerado" stroke="#47D7A0" strokeWidth={3} dot={{ r: 4, strokeWidth: 0 }} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="creator-bu-month-tabs" role="tablist" aria-label="Mes do realizado Creator BU">
+            {businessUnitMonths.map((item) => <button key={item.month} type="button" role="tab" aria-selected={selectedBusinessUnitMonth.month === item.month} className={selectedBusinessUnitMonth.month === item.month ? "active" : ""} onClick={() => setBusinessUnitMonth(item.month)}><span>{monthLabel(item.month)}</span><strong>{money(item.revenue)}</strong><small>Gasto considerado {money(item.consideredCost)}</small></button>)}
+          </div>
+          <div className="creator-bu-actual-summary">
+            <div><span>Receita Creator BU</span><strong>{money(selectedBusinessUnitMonth.revenue)}</strong><small>10% da comissao estimada</small></div>
+            <div><span>Custo observado no Notion</span><strong className="cost">{selectedBusinessUnitMonth.actualCost == null ? "—" : money(selectedBusinessUnitMonth.actualCost)}</strong><small>{integer(selectedBusinessUnitMonth.lineItemCount)} linhas creator-relevantes</small></div>
+            <div><span>Premissa salarios retencao</span><strong className="cost">{money(selectedBusinessUnitMonth.assumptionCost)}</strong><small>{selectedBusinessUnitMonth.assumptionLineItemCount ? "R$ 5 mil por pessoa · informada" : "substituida por linha observada"}</small></div>
+            <div><span>Resultado considerado da BU</span><strong>{money(selectedBusinessUnitMonth.consideredResult)}</strong><small>receita menos observado e premissa; plano separado</small></div>
+          </div>
+          <div className="creator-bu-drilldown">
+            {(selectedBusinessUnitMonth.categories || []).map((category) => <details key={category.key}><summary><span>{category.label}</span><strong>{money(category.amount)}</strong><small>{integer(category.lineItems.length)} linhas</small></summary><div>{category.lineItems.length ? category.lineItems.map((line) => <article key={line.id}><div><strong>{line.name}</strong><small>{line.sourceKind === "assumption" ? "PREMISSA INFORMADA · nao e lancamento contabil" : `${line.tipo || "Sem Tipo"} · ${line.provedor || "Sem Provedor"}`}</small></div><b>{money(line.value)}</b></article>) : <p>Nenhuma linha observada ou premissa classificada neste mes.</p>}</div></details>)}
+          </div>
+          <div className="creator-bu-plan">
+            <header><div><span>Plano Q3 · referencia separada</span><h3>Orcamento validado da Creator BU</h3></div><small>{creatorBusinessUnit.plan?.planId} · Projetos e Vendas excluidos</small></header>
+            <div>{q3PlanMonths.map((item) => <article key={item.month}><h4>{monthLabel(item.month)}</h4><dl><div><dt>Aquisicao · area</dt><dd>{money(item.areas.acquisition.area)}</dd></div><div><dt>Aquisicao · time</dt><dd>{money(item.areas.acquisition.team)}</dd></div><div><dt>Retencao · area</dt><dd>{money(item.areas.retention.area)}</dd></div><div><dt>Retencao · time</dt><dd>{money(item.areas.retention.team)}</dd></div><div><dt>Growth · area</dt><dd>{money(item.areas.growth.area)}</dd></div><div><dt>Growth · trafego pago</dt><dd>{money(item.areas.growth.paidTraffic)}</dd></div></dl></article>)}</div>
+            <footer>Plano nao preenche mes sem realizado e nunca e somado aos custos reais.</footer>
+          </div>
+          <footer><span>{businessUnitActuals.methodology}</span><b>{creatorBusinessUnit.definitions?.planSeparation}</b></footer>
+        </section>
+
         <section className="profitability-section">
           <header className="profitability-head">
             <div><span className="profit-kicker">Custos e lucratividade</span><h2>Quanto a operacao deixa depois do que ja conhecemos</h2><p>Receita diaria da Amplify contra custos comprovados. A cobertura cresce conforme novas fontes de custo forem cadastradas.</p></div>
@@ -949,6 +1019,19 @@ export default function CreatorEconomicsView() {
       .tier-chart-focus-head{display:flex;align-items:flex-end;justify-content:space-between;gap:22px;padding:18px 22px 6px}.tier-chart-focus-head h3{margin:5px 0 0;color:#EDF1F7;font-size:20px;letter-spacing:-.025em}.tier-chart-focus-head p{margin:6px 0 0;color:#7F889A;font-size:10px}.tier-chart-focus-head>div:last-child{text-align:right;min-width:185px}.tier-chart-focus-head>div:last-child span{color:#62D8FF}.tier-chart-focus-head strong{display:block;margin:4px 0 2px;color:#DDF8FF;font-size:24px}.tier-chart-focus-head small{color:#747D8E;font-size:9px}.tier-monetized-only-chart{padding-top:0}
       @media(max-width:900px){.lag-simple-head{display:grid}.lag-thesis{min-width:0;width:max-content}.lag-simple-grid,.lag-cohort-grid{grid-template-columns:1fr}.lag-simple-card{border-right:0;border-bottom:1px solid rgba(255,255,255,.065)}.lag-simple-grid>.lag-simple-card:last-child,.lag-cohort-grid>.lag-simple-card:last-child{border-bottom:0}.lag-evidence-card{grid-template-columns:1fr}.tier-chart-focus-head{align-items:flex-start}}
       @media(max-width:560px){.lag-simple-head{padding:23px 17px 18px}.lag-simple-head h2{font-size:25px}.lag-thesis{width:100%}.lag-simple-card>header{display:grid;padding:17px 15px 7px}.lag-simple-card>header small{text-align:left}.lag-simple-chart,.lag-cohort-chart{height:320px;padding-left:0;padding-right:0}.lag-weekly-chart{height:340px;padding-left:0;padding-right:0}.weekly-forecast-total{text-align:left;min-width:0}.lag-evidence-card{padding:18px 15px}.lag-evidence-comparison{grid-template-columns:1fr}.lag-evidence-comparison>div{border-right:0;border-bottom:1px solid rgba(255,255,255,.06)}.lag-evidence-comparison>div:last-child{border-bottom:0}.tier-chart-focus-head{display:grid;padding:16px 16px 3px}.tier-chart-focus-head>div:last-child{text-align:left}.affiliation-returns-only .affiliation-movement-chart{height:320px}}
+    `}</style>
+    <style jsx global>{`
+      .retention-analytics-section,.creator-bu-section{margin:26px 0 22px;border:1px solid rgba(84,216,232,.23);border-radius:20px;background:#090D15;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,.24)}
+      .retention-analytics-head,.creator-bu-head{display:flex;justify-content:space-between;gap:28px;padding:27px 28px 22px;border-bottom:1px solid rgba(255,255,255,.07)}
+      .retention-analytics-head h2,.creator-bu-head h2{margin:0;color:#F5F7FC;font-size:30px;letter-spacing:-.04em}.retention-analytics-head p,.creator-bu-head p{margin:9px 0 0;color:#8790A1;font-size:12px}
+      .retention-censor,.creator-bu-status{min-width:235px;max-width:310px;padding:13px 15px;border:1px solid rgba(246,184,75,.22);border-radius:12px;background:rgba(246,184,75,.05)}.retention-censor span,.creator-bu-status span{display:block;color:#D5A853;font:750 8px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.08em}.retention-censor strong,.creator-bu-status strong{display:block;margin:6px 0 3px;font-size:20px}.retention-censor small,.creator-bu-status small{display:block;color:#788195;font-size:9px;line-height:1.4;overflow-wrap:anywhere}.creator-bu-status.observed{border-color:rgba(71,215,160,.24);background:rgba(71,215,160,.05)}.creator-bu-status.observed span{color:#47D7A0}
+      .retention-summary-grid,.creator-bu-actual-summary{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid rgba(255,255,255,.07)}.retention-summary-grid>div,.creator-bu-actual-summary>div{padding:19px 20px;border-right:1px solid rgba(255,255,255,.06)}.retention-summary-grid>div:last-child,.creator-bu-actual-summary>div:last-child{border:0}.retention-summary-grid span,.creator-bu-actual-summary span{display:block;color:#7E8799;font:750 8px ui-monospace,monospace;text-transform:uppercase}.retention-summary-grid strong,.creator-bu-actual-summary strong{display:block;margin:7px 0 3px;font-size:24px}.retention-summary-grid small,.creator-bu-actual-summary small{color:#687286;font-size:9px}
+      .retention-analytics-grid{display:grid;grid-template-columns:1fr 1fr}.retention-analytics-grid>article{min-width:0;border-right:1px solid rgba(255,255,255,.06)}.retention-analytics-grid>article:last-child{border:0}.retention-analytics-grid article>header{display:flex;justify-content:space-between;padding:16px 18px 10px;color:#AAB2C2;font-size:11px}.retention-analytics-grid article>header small{color:#697286;font-size:8px}.retention-tier-list,.retention-month-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));padding:0 14px 16px;gap:7px}.retention-tier-list>div,.retention-month-list>div{padding:12px;border:1px solid rgba(255,255,255,.06);border-radius:9px;background:#0C111B}.retention-tier-list span,.retention-month-list span{display:block;color:#838C9D;font-size:9px}.retention-tier-list strong,.retention-month-list strong{display:block;margin:5px 0;color:#DDE2EB;font-size:16px}.retention-tier-list small,.retention-month-list small{color:#697286;font-size:8px}.retention-analytics-section>footer,.creator-bu-section>footer{display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:13px 22px;border-top:1px solid rgba(255,255,255,.07);color:#747D8F;font:500 9px/1.5 ui-monospace,monospace}.retention-analytics-section>footer b,.creator-bu-section>footer b{color:#D1A052;font-weight:600}
+      .creator-bu-section{border-color:rgba(71,215,160,.26)}.creator-bu-chart{height:350px;padding:16px 18px 10px;border-bottom:1px solid rgba(255,255,255,.07)}.creator-bu-month-tabs{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;padding:14px;border-bottom:1px solid rgba(255,255,255,.07)}.creator-bu-month-tabs button{display:grid;gap:4px;text-align:left;border:1px solid rgba(255,255,255,.08);border-radius:11px;background:#0B1019;color:#E7EAF0;padding:13px;cursor:pointer}.creator-bu-month-tabs button:hover,.creator-bu-month-tabs button:focus-visible{border-color:#54D8E8;outline:2px solid transparent}.creator-bu-month-tabs button.active{border-color:rgba(84,216,232,.55);background:rgba(84,216,232,.08)}.creator-bu-month-tabs span{color:#788195;font:700 9px ui-monospace,monospace;text-transform:uppercase}.creator-bu-month-tabs strong{font-size:18px}.creator-bu-month-tabs small{color:#7A8497;font-size:9px}.creator-bu-actual-summary .cost{color:#F6B84B}
+      .creator-bu-drilldown{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:14px;border-bottom:1px solid rgba(255,255,255,.07)}.creator-bu-drilldown details{min-width:0;border:1px solid rgba(255,255,255,.07);border-radius:10px;background:#0A0F18;overflow:hidden}.creator-bu-drilldown summary{display:grid;grid-template-columns:1fr auto;gap:3px 12px;padding:13px 14px;cursor:pointer;list-style-position:inside}.creator-bu-drilldown summary:focus-visible{outline:2px solid #54D8E8;outline-offset:-2px}.creator-bu-drilldown summary span{font-size:11px;font-weight:750}.creator-bu-drilldown summary strong{color:#F6B84B;font-size:13px}.creator-bu-drilldown summary small{grid-column:1/-1;color:#6F788B;font-size:8px}.creator-bu-drilldown details>div{max-height:320px;overflow:auto;border-top:1px solid rgba(255,255,255,.06)}.creator-bu-drilldown article{display:flex;justify-content:space-between;gap:15px;padding:10px 14px;border-bottom:1px solid rgba(255,255,255,.05)}.creator-bu-drilldown article:last-child{border:0}.creator-bu-drilldown article strong{display:block;color:#D6DBE5;font-size:10px}.creator-bu-drilldown article small{color:#6E7789;font-size:8px}.creator-bu-drilldown article b{white-space:nowrap;color:#E6EAF1;font-size:10px}.creator-bu-drilldown p{margin:0;padding:13px;color:#6F788B;font-size:9px}
+      .creator-bu-plan{margin:14px;border:1px dashed rgba(169,155,255,.27);border-radius:13px;background:rgba(169,155,255,.035);overflow:hidden}.creator-bu-plan>header{display:flex;justify-content:space-between;gap:18px;padding:16px 18px;border-bottom:1px solid rgba(255,255,255,.06)}.creator-bu-plan>header span{color:#A99BFF;font:750 8px ui-monospace,monospace;text-transform:uppercase}.creator-bu-plan h3{margin:5px 0 0;font-size:18px}.creator-bu-plan>header small{color:#747D8E;font-size:8px}.creator-bu-plan>div{display:grid;grid-template-columns:repeat(3,1fr)}.creator-bu-plan article{padding:15px;border-right:1px solid rgba(255,255,255,.06)}.creator-bu-plan article:last-child{border:0}.creator-bu-plan h4{margin:0 0 10px;color:#D8D1FF}.creator-bu-plan dl{margin:0}.creator-bu-plan dl>div{display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.04)}.creator-bu-plan dt{color:#7D8698;font-size:9px}.creator-bu-plan dd{margin:0;color:#D5DAE4;font-size:9px;font-weight:700}.creator-bu-plan>footer{padding:11px 16px;border-top:1px solid rgba(255,255,255,.06);color:#A99BFF;font:600 9px ui-monospace,monospace}
+      @media(max-width:820px){.retention-analytics-head,.creator-bu-head{display:grid}.retention-summary-grid,.creator-bu-actual-summary{grid-template-columns:1fr}.retention-summary-grid>div,.creator-bu-actual-summary>div{border-right:0;border-bottom:1px solid rgba(255,255,255,.06)}.retention-analytics-grid{grid-template-columns:1fr}.retention-analytics-grid>article{border-right:0;border-bottom:1px solid rgba(255,255,255,.06)}.creator-bu-drilldown{grid-template-columns:1fr}.creator-bu-plan>div{grid-template-columns:1fr}.creator-bu-plan article{border-right:0;border-bottom:1px solid rgba(255,255,255,.06)}.retention-analytics-section>footer,.creator-bu-section>footer{grid-template-columns:1fr}}
+      @media(max-width:560px){.retention-analytics-head,.creator-bu-head{padding:22px 16px 17px}.retention-analytics-head h2,.creator-bu-head h2{font-size:25px}.retention-censor,.creator-bu-status{min-width:0;max-width:none}.retention-tier-list,.retention-month-list{grid-template-columns:1fr}.creator-bu-chart{height:285px;padding:12px 4px}.creator-bu-month-tabs{grid-template-columns:1fr}.creator-bu-plan>header{display:grid}.creator-bu-drilldown{padding:11px}.creator-bu-plan{margin:11px}}
     `}</style>
   </main>
 }

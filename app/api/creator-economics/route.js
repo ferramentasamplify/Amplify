@@ -1,4 +1,6 @@
 import { readFile } from 'node:fs/promises'
+import q3CreatorPlan from '../../../data/creator-business-unit-plan-q3-2026.v1.json'
+import { buildMonthlyCreatorBusinessUnit, buildRetentionAnalytics, normalizeGastosRows } from '../../../lib/creator-business-unit.mjs'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -276,7 +278,7 @@ async function readPortfolioAnalytics(from, to) {
   const totalExits = sum('exits')
   const priorCreatorDays = transitionDays.reduce((total, row) => total + Math.max(0, row.activeCreators - (Number(row.net) || 0)), 0)
   const selectedMonth = monthly.at(-1)
-  return {
+  const result = {
     source: payload.source,
     timezone: payload.timezone,
     definitions: payload.definitions,
@@ -301,7 +303,24 @@ async function readPortfolioAnalytics(from, to) {
     daily: daily.map(({ exitedCreatorIds, topExits, ...row }) => row),
     monthly,
   }
+  Object.defineProperty(result, '_dailyTransitions', { value: daily, enumerable: false })
+  return result
 }
+
+async function readCreatorActualCosts(request, from, to) {
+  try {
+    const endpoint = new URL('/api/gastos', request.url)
+    endpoint.searchParams.set('from', `${from}-01`)
+    endpoint.searchParams.set('to', lastDay(to))
+    const response = await fetch(endpoint, { cache: 'no-store', signal: AbortSignal.timeout(20_000) })
+    const payload = await response.json()
+    if (!response.ok || payload.error || !Array.isArray(payload.data)) throw new Error(payload.error || `API de gastos respondeu ${response.status}`)
+    return { status: 'observed', source: '/api/gastos · Notion', error: null, rows: normalizeGastosRows(payload.data), fetchedRows: payload.data.length }
+  } catch (error) {
+    return { status: 'unavailable', source: '/api/gastos · Notion', error: error.message, rows: [], fetchedRows: 0 }
+  }
+}
+
 async function readLagForecastAnalytics() {
   let payload
   try {
@@ -493,6 +512,7 @@ export async function GET(request) {
       readLagForecastAnalytics(),
     ])
     const creatorTierAnalytics = buildCreatorTierAnalytics(canonicalCreatorMonths, monthKeys)
+    const retentionAnalytics = buildRetentionAnalytics(portfolioAnalytics._dailyTransitions, snapshot.creators, canonicalCreatorMonths, monthKeys, { coverageFrom: snapshot.coverage.from })
 
     const activeRows = snapshot.creators.map((creator) => {
       const creatorMonths = canonicalCreatorMonths.get(String(creator.id))
@@ -603,6 +623,28 @@ export async function GET(request) {
         knownMargin: amplifyRevenue && resultAfterKnownCosts != null ? round(resultAfterKnownCosts / amplifyRevenue * 100) : null,
       }
     })
+    const actualCosts = await readCreatorActualCosts(request, from, to)
+    const businessUnitMonthly = buildMonthlyCreatorBusinessUnit({
+      months: monthKeys,
+      revenues: new Map(profitabilityMonthly.map((item) => [item.month, item.amplifyRevenue])),
+      costs: actualCosts.rows,
+    })
+    const creatorBusinessUnit = {
+      actuals: {
+        status: actualCosts.status,
+        source: actualCosts.source,
+        error: actualCosts.error,
+        fetchedRows: actualCosts.fetchedRows,
+        monthly: businessUnitMonthly,
+        categories: ['Salarios de aquisicao', 'Salarios de retencao', 'Aquisicao paga / trafego', 'CRM', 'IA / APIs', 'Outros'],
+        methodology: 'Receita = 10% da comissao estimada do creator no ledger diario. Custos observados = linhas creator-relevantes do Notion, classificadas por Tipo + Name + Provedor. Salarios de retencao usam a premissa informada de R$ 5 mil por pessoa (1 pessoa de jan-mai; 2 desde jun) somente quando nao existe linha observada de retencao no mes. O plano Q3 nunca preenche o realizado.',
+      },
+      plan: q3CreatorPlan,
+      definitions: {
+        actualResult: 'Resultado considerado = receita Creator BU menos custos observados e premissas explicitamente identificadas no mesmo mes.',
+        planSeparation: 'Plano Q3 e referencia versionada e aparece separado. Nao e somado ao realizado.',
+      },
+    }
     const profitabilityByOrigin = sourceBreakdown.map((item) => {
       const knownCost = item.key === 'paid-meta' && meta.spend != null ? round(meta.spend) : null
       const resultAfterKnownCosts = knownCost == null ? null : round(item.estimatedAmplifyRevenue - knownCost)
@@ -687,8 +729,10 @@ export async function GET(request) {
       affiliationDaily,
       portfolioAnalytics,
       creatorTierAnalytics,
+      retentionAnalytics,
       creatorLagAnalytics,
       profitability,
+      creatorBusinessUnit,
       summary: {
         activeCreators: filtered.length,
         observedCreators: filtered.length,
