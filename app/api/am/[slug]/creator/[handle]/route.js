@@ -334,6 +334,13 @@ export async function GET(req, { params }) {
       handle,
     });
     const lifecycle = buildLifecycle(creator, salesSnapshot.coverage?.to || toDate);
+    const primaryWarnings = [...new Set([
+      ...(salesSnapshot.warnings || []),
+      ...(timeline.warnings || []),
+    ])];
+    const auxiliaryWarnings = [...new Set([
+      ...(creatorResult.ok ? [] : [`Notion indisponivel: ${creatorResult.error.message}`]),
+    ])];
 
     return NextResponse.json({
       am: publicAmData(target),
@@ -376,13 +383,12 @@ export async function GET(req, { params }) {
         requestedPeriod: salesSnapshot.requested,
         effectiveCoverage: salesSnapshot.coverage,
         availablePeriods: salesSnapshot.availablePeriods,
-        warnings: [...new Set([
-          ...(creatorResult.ok ? [] : [`Notion indisponivel: ${creatorResult.error.message}`]),
-          ...(salesSnapshot.warnings || []),
-          ...(timeline.warnings || []),
-          ...(rolling30Timeline.warnings || []),
-        ])],
-        status: salesSnapshot.warnings?.length || timeline.warnings?.length ? "DEGRADED" : "OK",
+        warnings: primaryWarnings,
+        auxiliaryWarnings,
+        secondaryWarnings: {
+          rolling30: rolling30Timeline.warnings || [],
+        },
+        status: primaryWarnings.length ? "DEGRADED" : "OK",
         message: "GMV, comissão e pedidos vêm do Partner Center/base canônica. Notion entra como dimensão auxiliar.",
       },
       updatedAt: new Date().toISOString(),
