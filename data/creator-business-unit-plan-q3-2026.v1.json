@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "planId": "creator-business-unit-q3-2026-v1",
+  "currency": "BRL",
+  "source": "Workbook Q3 validado; recorte exclusivo de Creators",
+  "exclusions": ["Projetos", "Vendas"],
+  "months": [
+    {
+      "month": "2026-07",
+      "areas": {
+        "acquisition": { "area": 21250, "team": 16000 },
+        "retention": { "area": 17500, "team": 8000 },
+        "growth": { "area": 12318.62, "paidTraffic": 15500 }
+      }
+    },
+    {
+      "month": "2026-08",
+      "areas": {
+        "acquisition": { "area": 21250, "team": 16000 },
+        "retention": { "area": 17500, "team": 13000 },
+        "growth": { "area": 12318.62, "paidTraffic": 25000 }
+      }
+    },
+    {
+      "month": "2026-09",
+      "areas": {
+        "acquisition": { "area": 21250, "team": 16000 },
+        "retention": { "area": 20500, "team": 18000 },
+        "growth": { "area": 12318.62, "paidTraffic": 25000 }
+      }
+    }
+  ]
+}
