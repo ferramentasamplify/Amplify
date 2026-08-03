@@ -340,9 +340,12 @@ export async function GET(req, { params }) {
       handle,
     });
     const lifecycle = buildLifecycle(creator, salesSnapshot.coverage || { from: fromDate, to: toDate });
+    const timelineWarnings = [...new Set([
+      ...(timeline.warnings || []),
+      ...(rolling30Timeline.warnings || []),
+    ])];
     const primaryWarnings = [...new Set([
       ...(salesSnapshot.warnings || []),
-      ...(timeline.warnings || []),
     ])];
     const auxiliaryWarnings = [...new Set([
       ...(creatorResult.ok ? [] : [`Notion indisponivel: ${creatorResult.error.message}`]),
@@ -392,6 +395,7 @@ export async function GET(req, { params }) {
         warnings: primaryWarnings,
         auxiliaryWarnings,
         secondaryWarnings: {
+          timeline: timelineWarnings,
           rolling30: rolling30Timeline.warnings || [],
         },
         status: primaryWarnings.length ? "DEGRADED" : "OK",

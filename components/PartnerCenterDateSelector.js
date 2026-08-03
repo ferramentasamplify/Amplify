@@ -29,6 +29,13 @@ const daysInMonth = (monthISO) => {
   return new Date(Date.UTC(year, month, 0)).getUTCDate();
 };
 
+const monthStartOffset = (monthISO) => {
+  if (!monthISO) return 0;
+  const [year, month] = monthISO.split("-").map(Number);
+  const jsDay = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
+  return (jsDay + 6) % 7;
+};
+
 const fmtFullDate = (iso) => iso ? new Date(`${iso}T00:00:00Z`).toLocaleDateString("pt-BR") : "sem data";
 
 const datesFromFreshness = (freshness) => {
@@ -61,6 +68,7 @@ export default function PartnerCenterDateSelector({
   const maxDate = availableDates.at(-1) || freshness?.effectiveCoverage?.to || endDate;
   const activeMonth = (endDate || maxDate || startDate || "").slice(0, 7);
   const monthDays = activeMonth ? Array.from({ length: daysInMonth(activeMonth) }, (_, i) => `${activeMonth}-${String(i + 1).padStart(2, "0")}`) : [];
+  const leadingBlankDays = activeMonth ? Array.from({ length: monthStartOffset(activeMonth) }) : [];
   const weekdays = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sab", "Dom"];
 
   async function loadSelector() {
@@ -181,6 +189,7 @@ export default function PartnerCenterDateSelector({
                 </div>
                 <div className="grid grid-cols-7 gap-1 text-center">
                   {weekdays.map((day) => <div key={day} className="py-1 text-[10px] font-bold uppercase text-white/30">{day}</div>)}
+                  {leadingBlankDays.map((_, index) => <div key={`blank-${activeMonth}-${index}`} className="h-8" aria-hidden="true" />)}
                   {monthDays.map((day) => {
                     const disabled = day < minDate || day > maxDate;
                     const selected = day >= startDate && day <= endDate;
