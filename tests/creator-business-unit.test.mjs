@@ -3,10 +3,21 @@ import assert from 'node:assert/strict'
 import {
   classifyCreatorCost,
   buildCreatorCostInventory,
+  buildExitedCreatorRows,
   buildMonthlyCreatorBusinessUnit,
   buildRetentionAnalytics,
   retentionSalaryAssumptionForMonth,
 } from '../lib/creator-business-unit.mjs'
+
+test('keeps every exited creator and sorts the table by prior 30-day GMV', () => {
+  const rows = buildExitedCreatorRows([
+    { authorId: 3, alias: 'terceiro', gmvPrior30d: 12.345 },
+    { authorId: 1, alias: 'primeiro', gmvPrior30d: 900 },
+    { authorId: 2, alias: 'segundo', gmvPrior30d: 90 },
+  ])
+  assert.deepEqual(rows.map((row) => row.authorId), ['1', '2', '3'])
+  assert.deepEqual(rows.map((row) => row.gmvPrior30d), [900, 90, 12.35])
+})
 
 test('keeps the complete review inventory, including visible overlaps', () => {
   const inventory = buildCreatorCostInventory([

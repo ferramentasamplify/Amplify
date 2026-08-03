@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import q3CreatorPlan from '../../../data/creator-business-unit-plan-q3-2026.v1.json'
-import { buildCreatorCostInventory, buildMonthlyCreatorBusinessUnit, buildRetentionAnalytics, classifyCreatorCost, normalizeGastosRows } from '../../../lib/creator-business-unit.mjs'
+import { buildCreatorCostInventory, buildExitedCreatorRows, buildMonthlyCreatorBusinessUnit, buildRetentionAnalytics, classifyCreatorCost, normalizeGastosRows } from '../../../lib/creator-business-unit.mjs'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -300,7 +300,10 @@ async function readPortfolioAnalytics(from, to) {
       latestMonthMedianGmv: selectedMonth.medianGmvPerSeller,
       latestMonthTop5Share: selectedMonth.top5Share,
     },
-    daily: daily.map(({ exitedCreatorIds, topExits, ...row }) => row),
+    daily: daily.map(({ exitedCreatorIds, topExits, exitedCreators, ...row }) => ({
+      ...row,
+      exitedCreators: buildExitedCreatorRows(exitedCreators, topExits),
+    })),
     monthly,
   }
   Object.defineProperty(result, '_dailyTransitions', { value: daily, enumerable: false })
