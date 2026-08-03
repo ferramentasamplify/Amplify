@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import q3CreatorPlan from '../../../data/creator-business-unit-plan-q3-2026.v1.json'
-import { buildMonthlyCreatorBusinessUnit, buildRetentionAnalytics, normalizeGastosRows } from '../../../lib/creator-business-unit.mjs'
+import { buildCreatorCostInventory, buildMonthlyCreatorBusinessUnit, buildRetentionAnalytics, classifyCreatorCost, normalizeGastosRows } from '../../../lib/creator-business-unit.mjs'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -625,20 +625,46 @@ export async function GET(request) {
       }
     })
     const actualCosts = await readCreatorActualCosts(request, from, to)
+    const metaTrafficRows = meta.stale ? [] : profitabilityMonthly
+      .filter((item) => monthKeys.includes(item.month) && Number(item.trafficPaidCost) > 0)
+      .map((item) => ({
+        id: `meta-live-${item.month}`,
+        month: item.month,
+        value: round(item.trafficPaidCost),
+        name: `Meta Ads Creators · ${item.month}`,
+        tipo: 'Trafego Pago',
+        provedor: 'Meta Ads ao vivo',
+        category: 'paid-acquisition',
+        sourceKind: 'meta-live',
+        sourcePeriod: { from: `${item.month}-01`, to: item.month === to ? commonClosedThrough : lastDay(item.month) },
+        includedInResult: true,
+      }))
+    const metaTrafficMonths = new Set(metaTrafficRows.map((row) => row.month))
+    const notionReviewRows = actualCosts.rows.map((row) => {
+      const possibleOverlap = classifyCreatorCost(row) === 'paid-acquisition' && metaTrafficMonths.has(row.month)
+      return { ...row, sourceKind: 'notion', includedInResult: !possibleOverlap, reviewStatus: possibleOverlap ? 'possible-overlap-meta' : 'included' }
+    })
+    const reviewCosts = [...notionReviewRows, ...metaTrafficRows]
+    const includedCosts = reviewCosts.filter((row) => row.includedInResult !== false)
     const businessUnitMonthly = buildMonthlyCreatorBusinessUnit({
       months: monthKeys,
       revenues: new Map(profitabilityMonthly.map((item) => [item.month, item.amplifyRevenue])),
-      costs: actualCosts.rows,
+      costs: includedCosts,
     })
     const creatorBusinessUnit = {
       actuals: {
         status: actualCosts.status,
-        source: actualCosts.source,
+        source: meta.stale ? actualCosts.source : `${actualCosts.source} + Meta Ads ao vivo`,
         error: actualCosts.error,
         fetchedRows: actualCosts.fetchedRows,
+        supplementalRows: metaTrafficRows.length,
+        reviewRows: reviewCosts.length,
+        includedRows: includedCosts.length,
+        inventory: buildCreatorCostInventory(reviewCosts),
+        consideredInventory: buildCreatorCostInventory(includedCosts),
         monthly: businessUnitMonthly,
         categories: ['Salarios de aquisicao', 'Salarios de retencao', 'Aquisicao paga / trafego', 'CRM', 'IA / APIs', 'Outros'],
-        methodology: 'Receita = 10% da comissao estimada do creator no ledger diario. Custos observados = linhas creator-relevantes do Notion, classificadas por Tipo + Name + Provedor. Salarios de retencao usam a premissa informada de R$ 5 mil por pessoa (1 pessoa de jan-mai; 2 desde jun) somente quando nao existe linha observada de retencao no mes. O plano Q3 nunca preenche o realizado.',
+        methodology: 'Receita = 10% da comissao estimada do creator no ledger diario. O inventario de revisao inclui todas as linhas validas do Notion e o trafego de creators observado diretamente na Meta. Linhas Notion de trafego em meses cobertos pela Meta permanecem visiveis, mas ficam fora do resultado como possivel sobreposicao. Salarios de retencao usam a premissa informada de R$ 5 mil por pessoa (1 pessoa de jan-mai; 2 desde jun) somente quando nao existe linha observada de retencao no mes. O plano Q3 nunca preenche o realizado.',
       },
       plan: q3CreatorPlan,
       definitions: {

@@ -2,10 +2,23 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   classifyCreatorCost,
+  buildCreatorCostInventory,
   buildMonthlyCreatorBusinessUnit,
   buildRetentionAnalytics,
   retentionSalaryAssumptionForMonth,
 } from '../lib/creator-business-unit.mjs'
+
+test('keeps the complete review inventory, including visible overlaps', () => {
+  const inventory = buildCreatorCostInventory([
+    { id: 'notion-meta', month: '2026-03', value: 100, tipo: 'Trafego Pago', name: 'Meta Notion', provedor: 'Meta', includedInResult: false },
+    { id: 'meta-live', month: '2026-03', value: 110, tipo: 'Trafego Pago', name: 'Meta ao vivo', provedor: 'Meta Ads ao vivo', includedInResult: true },
+    { id: 'openai', month: '2026-03', value: 20, tipo: 'API', name: 'OpenAI', provedor: 'OpenAI', includedInResult: true },
+  ])
+  assert.equal(inventory.totalCost, 230)
+  assert.equal(inventory.lineItemCount, 3)
+  assert.equal(inventory.categories.find((item) => item.key === 'paid-acquisition').lineItems.length, 2)
+  assert.equal(inventory.categories.find((item) => item.key === 'ai-apis').amount, 20)
+})
 
 test('classifies creator costs robustly from Tipo, Name and Provedor', () => {
   assert.equal(classifyCreatorCost({ tipo: 'Folha', name: 'Salario time de aquisicao creators', provedor: 'Pessoa A' }), 'salaries-acquisition')
@@ -54,8 +67,8 @@ test('applies the informed retention salary premise without duplicating an obser
 
 test('derives exit duration, monthly prior GMV and later-return rate from daily transitions', () => {
   const daily = [
-    { date: '2026-07-10', exits: 2, exitedCreatorIds: ['a', 'b'], exitedGmvPrior30d: 300, gmvWindowComplete: true },
-    { date: '2026-07-20', exits: 1, exitedCreatorIds: ['a'], exitedGmvPrior30d: 50, gmvWindowComplete: true },
+    { date: '2026-07-10', exits: 2, returns: 1, exitedCreatorIds: ['a', 'b'], exitedGmvPrior30d: 300, exitedCreatorsWithGmv30d: 2, gmvWindowComplete: true },
+    { date: '2026-07-20', exits: 1, returns: 2, exitedCreatorIds: ['a'], exitedGmvPrior30d: 50, exitedCreatorsWithGmv30d: 1, gmvWindowComplete: true },
   ]
   const creators = [
     { id: 'a', runs: [{ from: '2026-07-01', to: '2026-07-09', days: 9 }, { from: '2026-07-15', to: '2026-07-19', days: 5 }, { from: '2026-07-25', to: '2026-07-31', days: 7 }] },
@@ -72,6 +85,13 @@ test('derives exit duration, monthly prior GMV and later-return rate from daily 
   assert.equal(result.summary.uniqueExitedCreatorsWithLaterReturn, 1)
   assert.equal(result.summary.laterReturnPercent, 50)
   assert.equal(result.monthly[0].exitedGmvPrior30d, 350)
+  assert.equal(result.monthly[0].observedExits, 3)
+  assert.equal(result.monthly[0].observedReturns, 3)
+  assert.equal(result.monthly[0].cohortReturnedCreators, 1)
+  assert.equal(result.monthly[0].cohortReturnPercent, 50)
+  assert.equal(result.monthly[0].cohortReturnPercentDisplay, null)
+  assert.equal(result.monthly[0].exitedCreatorsWithGmv30d, 3)
+  assert.equal(result.monthly[0].avgGmvPrior30dPerExit, 116.67)
   assert.equal(result.byTier.find((item) => item.key === 'silver').meanDaysToExit, 7)
 })
 
