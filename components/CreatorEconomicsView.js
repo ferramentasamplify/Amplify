@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { Area, Bar, CartesianGrid, ComposedChart, Legend, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import { deriveCreatorBaseHealth } from "../lib/creator-base-health.mjs"
+import { CREATOR_DASHBOARD_SECTIONS, filterDashboardRows, normalizeCreatorDashboardSection } from "../lib/creator-dashboard.mjs"
 
 const money = (value) => Number(value || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 2 })
 const compactMoney = (value) => new Intl.NumberFormat("pt-BR", { notation: "compact", style: "currency", currency: "BRL", maximumFractionDigits: 1 }).format(Number(value || 0))
@@ -127,12 +128,53 @@ export default function CreatorEconomicsView() {
   const [portfolioMonth, setPortfolioMonth] = useState("2026-07")
   const [tierTransitionMonth, setTierTransitionMonth] = useState("2026-07")
   const [movementWindow, setMovementWindow] = useState("30")
+  const [exitChartView, setExitChartView] = useState("combined")
+  const [dashboardSection, setDashboardSection] = useState("overview")
+  const [focusCreatorExplorer, setFocusCreatorExplorer] = useState(false)
   const [selectedExitDate, setSelectedExitDate] = useState("")
   const [businessUnitMonth, setBusinessUnitMonth] = useState("")
   const [portfolioForecastScenario, setPortfolioForecastScenario] = useState("moving7d")
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
+
+
+  useEffect(() => {
+    const readSection = () => {
+      const params = new URLSearchParams(window.location.search)
+      setDashboardSection(normalizeCreatorDashboardSection(params.get("section")))
+    }
+    readSection()
+    window.addEventListener("popstate", readSection)
+    return () => window.removeEventListener("popstate", readSection)
+  }, [])
+
+  const selectDashboardSection = (section, { replace = false } = {}) => {
+    const nextSection = normalizeCreatorDashboardSection(section)
+    setDashboardSection(nextSection)
+    const url = new URL(window.location.href)
+    if (nextSection === "overview") url.searchParams.delete("section")
+    else url.searchParams.set("section", nextSection)
+    if (replace) window.history.replaceState({}, "", url)
+    else window.history.pushState({}, "", url)
+    window.scrollTo({ top: 0, behavior: "smooth" })
+  }
+
+  const openCreatorExplorer = (alias) => {
+    setQueryDraft(alias || "")
+    setPage(1)
+    setFocusCreatorExplorer(true)
+    selectDashboardSection("acquisition")
+  }
+
+  useEffect(() => {
+    if (dashboardSection !== "acquisition" || !focusCreatorExplorer || !data) return undefined
+    const timer = window.setTimeout(() => {
+      document.querySelector(".creator-panel")?.scrollIntoView({ behavior: "smooth", block: "start" })
+      setFocusCreatorExplorer(false)
+    }, 50)
+    return () => window.clearTimeout(timer)
+  }, [dashboardSection, focusCreatorExplorer, data])
 
   useEffect(() => {
     const timer = setTimeout(() => { setQuery(queryDraft); setPage(1) }, 250)
@@ -244,10 +286,12 @@ export default function CreatorEconomicsView() {
   const latestFlowAnalysis = flowAnalysisData.at(-1) || {}
   const movementChartData = movementWindow === "all" ? movementData : movementData.slice(-Number(movementWindow))
   const latestMovement = movementData.at(-1) || {}
-  const selectedExitDay = movementData.find((item) => item.date === selectedExitDate) || movementChartData.filter((item) => Number(item.exits || 0) > 0).at(-1) || {}
+  const selectedExitDay = selectedExitDate ? movementData.find((item) => item.date === selectedExitDate) || {} : {}
   const selectedExitedCreators = [...(selectedExitDay.exitedCreators || [])].sort((left, right) => Number(right.gmvPrior30d || 0) - Number(left.gmvPrior30d || 0) || String(left.authorId).localeCompare(String(right.authorId)))
   const visibleExitEvents = movementChartData.reduce((total, item) => total + Number(item.exits || 0), 0)
   const visibleExitGmvPrior30d = movementChartData.reduce((total, item) => total + Number(item.exitedGmvPrior30d || 0), 0)
+  const exitRankingByEvents = [...movementChartData].filter((item) => Number(item.exits || 0) > 0).sort((left, right) => Number(right.exits || 0) - Number(left.exits || 0) || String(right.date).localeCompare(String(left.date))).slice(0, 10)
+  const exitRankingByGmv = [...movementChartData].filter((item) => Number(item.exitedGmvPrior30d || 0) > 0).sort((left, right) => Number(right.exitedGmvPrior30d || 0) - Number(left.exitedGmvPrior30d || 0) || String(right.date).localeCompare(String(left.date))).slice(0, 10)
   const setExitWindow = (window) => {
     setMovementWindow(window)
     const rows = window === "all" ? movementData : movementData.slice(-Number(window))
@@ -270,6 +314,12 @@ export default function CreatorEconomicsView() {
   const selectedBusinessUnitMonth = businessUnitMonths.find((item) => item.month === businessUnitMonth) || businessUnitMonths.at(-1) || {}
   const q3PlanMonths = creatorBusinessUnit.plan?.months || []
   const showPaid = source === "all" || source === "paid-meta"
+  const activeSourceLabel = data?.sourceOptions?.find((item) => item.key === source)?.label || source
+  const overviewTableRows = filterDashboardRows(chartData, { from, to })
+  const baseTableRows = filterDashboardRows(dailyData, { from, to })
+  const activationTableRows = filterDashboardRows(matureMonthlyCohorts.map((item) => ({ ...item, month: item.entryMonth || item.month })), { from, to })
+  const retentionTableRows = filterDashboardRows(retention.monthly || [], { from, to })
+  const financeTableRows = filterDashboardRows(businessUnitMonths, { from, to })
 
   return <main className="economics-page">
     <nav className="econ-topbar">
@@ -281,8 +331,8 @@ export default function CreatorEconomicsView() {
       <header className="econ-hero">
         <div>
           <span className="econ-kicker"><i /> Unit economics conectado</span>
-          <h1>Analise Business Unit Creators</h1>
-          <p>Da origem de aquisicao ao GMV diario do Partner Center. Cada creator e unido pelo @ e pelo historico de aliases — sem misturar snapshot acumulado com receita nova.</p>
+          <h1>Business Unit Creators</h1>
+          <p>Dashboard oficial para operar base, ativacao, movimentacao, retencao, GMV, aquisicao e resultado financeiro da BU.</p>
         </div>
         <div className="hero-formula">
           <span>Receita Amplify estimada</span>
@@ -300,11 +350,17 @@ export default function CreatorEconomicsView() {
           <TrustPill ok>AmplifyOS nativo · {integer(data?.sources?.amplifyos?.uniqueHandles || 0)} @</TrustPill>
           <TrustPill ok>Join exato por @</TrustPill>
           <TrustPill ok>Desconhecida incluida em Meta</TrustPill>
+          {source !== "all" && <button type="button" className="global-filter-chip" onClick={() => { setSource("all"); setPage(1) }} aria-label={`Limpar filtro de origem ${activeSourceLabel}`}>Origem ativa: {activeSourceLabel} ×</button>}
         </div>
       </section>
 
+      <nav className="creator-dashboard-nav" aria-label="Secoes do dashboard Creator BU">
+        {CREATOR_DASHBOARD_SECTIONS.map((section) => <button key={section.id} type="button" className={dashboardSection === section.id ? "active" : ""} aria-current={dashboardSection === section.id ? "page" : undefined} onClick={() => selectDashboardSection(section.id)}><span>{section.label}</span><small>{section.tableLabel}</small></button>)}
+      </nav>
+
       {error && <div className="econ-error"><strong>O painel nao carregou.</strong><span>{error}</span></div>}
       {loading && !data ? <div className="econ-loading"><i /><span>Cruzando aquisicao, formularios e retencao…</span></div> : data && <>
+        {dashboardSection === "base" && <div className="dashboard-surface" data-dashboard-section="base">
         <section className="affiliation-daily">
           <header className="affiliation-head">
             <div><span className="affiliation-kicker">Ledger diario canonico</span><h2>Agenciados por dia</h2><p>Uma consulta fechada por data no relatorio Criador. Sem inferir vinculo por GMV acumulado.</p></div>
@@ -562,6 +618,13 @@ export default function CreatorEconomicsView() {
           <footer className="portfolio-projection-note"><b>Formula:</b> ativos de amanha = ativos de hoje + media 7d de entradas - (ativos de hoje × taxa diaria de saida 7d). <em>{portfolioForecast.caveat} Retornos nao entram porque o grafico de referencia usa somente primeiras aparicoes.</em></footer>
         </section>}
 
+        <section className="dashboard-table-card" data-dashboard-table="base">
+          <header><div><span>Detalhamento reativo</span><h2>Historico diario da base</h2></div><small>{integer(baseTableRows.length)} dias nos filtros globais</small></header>
+          <div className="dashboard-table-scroll"><table><thead><tr><th>Data</th><th>Agenciados</th><th>Com GMV no dia</th><th>Com GMV 30d</th><th>GMV diario</th><th>GMV medio 7d</th><th>GMV acumulado 30d</th></tr></thead><tbody>{baseTableRows.slice().reverse().map((row) => <tr key={row.date}><td>{date(row.date)}</td><td>{integer(row.affiliatedCreators)}</td><td>{integer(row.gmvCreators)}</td><td>{integer(row.gmvCreatorsLast30Days)}</td><td>{money(row.dailyGmv)}</td><td>{money(row.gmvAverage7Days)}</td><td><strong>{money(row.gmvTotal30Days)}</strong></td></tr>)}{baseTableRows.length === 0 && <tr><td colSpan="7"><div className="dashboard-table-empty">Nenhum resultado para os filtros ativos.</div></td></tr>}</tbody></table></div>
+        </section>
+        </div>}
+
+        {dashboardSection === "activation" && <div className="dashboard-surface" data-dashboard-section="activation">
         {lagAnalytics.schemaVersion === 1 && <section id="lag-forecast" className="lag-forecast-section lag-simple-section">
           <header className="lag-simple-head">
             <div><span className="lag-kicker">Do agenciamento ao GMV</span><h2>O que acontece depois que um creator entra?</h2><p>Leitura direta de ativacao, velocidade, qualidade das safras e GMV esperado. Sem correlacoes tecnicas ou curvas com duas escalas.</p></div>
@@ -610,6 +673,13 @@ export default function CreatorEconomicsView() {
           <div className="lag-method-note"><b>Como ler:</b> entrada e a primeira aparicao do creator no ledger. Ativacao significa ter algum GMV. GMV medio pode ser puxado por poucos creators; por isso ativacao e valor aparecem em graficos separados.</div>
         </section>}
 
+        <section className="dashboard-table-card" data-dashboard-table="activation">
+          <header><div><span>Detalhamento reativo</span><h2>Safras maduras de ativacao</h2></div><small>Somente safras com 30 dias completos</small></header>
+          <div className="dashboard-table-scroll"><table><thead><tr><th>Safra</th><th>Creators</th><th>Ativacao D+30</th><th>GMV medio D0-D30</th><th>GMV mediano D0-D30</th></tr></thead><tbody>{activationTableRows.slice().reverse().map((row) => <tr key={row.month}><td>{monthLabel(row.month)}</td><td>{integer(row.matureEntrants)}</td><td><strong>{percent(row.activation30Percent)}</strong></td><td>{money(row.averageGmv30)}</td><td>{money(row.medianGmv30)}</td></tr>)}{activationTableRows.length === 0 && <tr><td colSpan="5"><div className="dashboard-table-empty">Nenhum resultado para os filtros ativos.</div></td></tr>}</tbody></table></div>
+        </section>
+        </div>}
+
+        {dashboardSection === "movement" && <div className="dashboard-surface" data-dashboard-section="movement">
         <section className="affiliation-movement-copy">
           <header className="affiliation-movement-head">
             <div><span className="affiliation-kicker">Fluxo diario da carteira</span><h2>Agenciados, novos e desvinculados</h2><p>Estoque total e movimentacoes calculadas pela diferenca entre dois relatorios diarios consecutivos.</p></div>
@@ -658,29 +728,36 @@ export default function CreatorEconomicsView() {
         </section>
 
         <section className="movement-section econ-panel">
-          <header><div><span>Movimentacao diaria da base</span><h2>Desvinculados e GMV previo 30d</h2></div><div className="movement-head-side"><small>Clique em um dia do grafico para ver abaixo quem saiu. A tabela fica sempre do maior GMV previo para o menor.</small><div className="view-switch"><button className={movementWindow === "30" ? "active" : ""} onClick={() => setExitWindow("30")}>30d</button><button className={movementWindow === "60" ? "active" : ""} onClick={() => setExitWindow("60")}>60d</button><button className={movementWindow === "all" ? "active" : ""} onClick={() => setExitWindow("all")}>Tudo</button></div></div></header>
+          <header><div><span>Movimentacao diaria da base</span><h2>Desvinculados e GMV previo 30d</h2></div><div className="movement-head-side"><small>Clique em um dia para ver abaixo quem saiu. Use a leitura mais clara para sua decisao.</small><div className="view-switch" role="group" aria-label="Modo de leitura do grafico"><button type="button" aria-pressed={exitChartView === "combined"} className={exitChartView === "combined" ? "active" : ""} onClick={() => setExitChartView("combined")}>Combinado</button><button type="button" aria-pressed={exitChartView === "split"} className={exitChartView === "split" ? "active" : ""} onClick={() => setExitChartView("split")}>Separado</button><button type="button" aria-pressed={exitChartView === "ranking"} className={exitChartView === "ranking" ? "active" : ""} onClick={() => setExitChartView("ranking")}>Ranking</button></div><div className="view-switch" role="group" aria-label="Janela do grafico"><button type="button" aria-pressed={movementWindow === "30"} className={movementWindow === "30" ? "active" : ""} onClick={() => setExitWindow("30")}>30d</button><button type="button" aria-pressed={movementWindow === "60"} className={movementWindow === "60" ? "active" : ""} onClick={() => setExitWindow("60")}>60d</button><button type="button" aria-pressed={movementWindow === "all"} className={movementWindow === "all" ? "active" : ""} onClick={() => setExitWindow("all")}>Tudo</button></div></div></header>
           <div className="movement-kpis movement-kpis-exits">
             <div><span>Desvinculados no periodo</span><strong>{integer(visibleExitEvents)}</strong><small>eventos dentro da janela selecionada</small></div>
             <div><span>GMV previo 30d associado</span><strong>{compactMoney(visibleExitGmvPrior30d)}</strong><small>soma dos 30 dias anteriores a cada saida</small></div>
           </div>
-          <div className="movement-chart" role="img" aria-label="Grafico clicavel de desvinculados e GMV previo dos 30 dias por data">
+          {exitChartView === "combined" && <div className="movement-chart" role="img" aria-label="Grafico combinado: barras corais representam desvinculados; linha ciano representa GMV previo 30 dias">
             <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 1320, height: 350 }}>
               <ComposedChart data={movementChartData} margin={{ top: 20, right: 12, left: -2, bottom: 0 }} onClick={(event) => { if (event?.activeLabel) setSelectedExitDate(event.activeLabel) }}>
                 <CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} />
                 <XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#5E6678" tick={{ fontSize: 10 }} minTickGap={30} />
                 <YAxis yAxisId="people" stroke="#6B7180" tick={{ fontSize: 10 }} width={42} />
-                <YAxis yAxisId="gmv" orientation="right" tickFormatter={compactMoney} stroke="#8A6069" tick={{ fontSize: 10 }} width={72} />
-                <Tooltip content={<MovementTooltip />} />
-                <Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} />
+                <YAxis yAxisId="gmv" orientation="right" tickFormatter={compactMoney} stroke="#3F8E9A" tick={{ fontSize: 10 }} width={72} />
+                <Tooltip content={<MovementTooltip />} /><Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} />
                 {selectedExitDay.date && <ReferenceLine yAxisId="people" x={selectedExitDay.date} stroke="#F4F6FF" strokeOpacity={0.5} strokeDasharray="3 4" />}
-                <Bar yAxisId="people" dataKey="exits" name="Desvinculados" fill="#FF647C" radius={[3, 3, 0, 0]} cursor="pointer" />
-                <Line yAxisId="gmv" type="monotone" dataKey="exitedGmvPrior30d" name="GMV previo 30d" stroke="#FF9AAC" strokeWidth={2.8} dot={false} activeDot={{ r: 5, cursor: "pointer" }} connectNulls={false} />
+                <Bar yAxisId="people" dataKey="exits" name="Desvinculados · barras" fill="#FF647C" radius={[3, 3, 0, 0]} cursor="pointer" />
+                <Line yAxisId="gmv" type="monotone" dataKey="exitedGmvPrior30d" name="GMV previo 30d · linha" stroke="#54D8E8" strokeWidth={3} dot={false} activeDot={{ r: 5, cursor: "pointer" }} connectNulls={false} />
               </ComposedChart>
             </ResponsiveContainer>
-          </div>
-          <div className="exit-day-drilldown">
+          </div>}
+          {exitChartView === "split" && <div className="movement-split-grid">
+            <article><header><span>Quantidade</span><h3>Desvinculados por dia</h3></header><div className="movement-split-chart"><ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 640, height: 300 }}><ComposedChart data={movementChartData} margin={{ top: 14, right: 8, left: -8, bottom: 0 }} onClick={(event) => { if (event?.activeLabel) setSelectedExitDate(event.activeLabel) }}><CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} /><XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#5E6678" tick={{ fontSize: 9 }} minTickGap={26} /><YAxis allowDecimals={false} stroke="#8E5C67" tick={{ fontSize: 9 }} width={42} /><Tooltip content={<MovementTooltip />} />{selectedExitDay.date && <ReferenceLine x={selectedExitDay.date} stroke="#F4F6FF" strokeOpacity={0.45} strokeDasharray="3 4" />}<Bar dataKey="exits" name="Desvinculados" fill="#FF647C" radius={[3, 3, 0, 0]} cursor="pointer" /></ComposedChart></ResponsiveContainer></div></article>
+            <article><header><span>Valor associado</span><h3>GMV previo 30d por saida</h3></header><div className="movement-split-chart"><ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 640, height: 300 }}><ComposedChart data={movementChartData} margin={{ top: 14, right: 8, left: 2, bottom: 0 }} onClick={(event) => { if (event?.activeLabel) setSelectedExitDate(event.activeLabel) }}><CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} /><XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#5E6678" tick={{ fontSize: 9 }} minTickGap={26} /><YAxis tickFormatter={compactMoney} stroke="#3F8E9A" tick={{ fontSize: 9 }} width={66} /><Tooltip content={<MovementTooltip />} />{selectedExitDay.date && <ReferenceLine x={selectedExitDay.date} stroke="#F4F6FF" strokeOpacity={0.45} strokeDasharray="3 4" />}<Area type="monotone" dataKey="exitedGmvPrior30d" name="GMV previo 30d" stroke="#54D8E8" fill="rgba(84,216,232,.14)" strokeWidth={3} dot={false} /></ComposedChart></ResponsiveContainer></div></article>
+          </div>}
+          {exitChartView === "ranking" && <div className="movement-ranking-grid">
+            <article><header><span>Top 10 dias</span><h3>Mais desvinculacoes</h3></header><ol>{exitRankingByEvents.map((row) => <li key={`events-${row.date}`}><button type="button" onClick={() => setSelectedExitDate(row.date)}><span>{date(row.date)}</span><strong>{integer(row.exits)} creators</strong></button></li>)}</ol></article>
+            <article><header><span>Top 10 dias</span><h3>Maior GMV previo associado</h3></header><ol>{exitRankingByGmv.map((row) => <li key={`gmv-${row.date}`}><button type="button" onClick={() => setSelectedExitDate(row.date)}><span>{date(row.date)}</span><strong>{money(row.exitedGmvPrior30d)}</strong></button></li>)}</ol></article>
+          </div>}
+          <div className="exit-day-drilldown" data-dashboard-table="movement">
             <header>
-              <div><span>Creators que sairam</span><h3>{selectedExitDay.date ? date(selectedExitDay.date) : "Selecione um dia"}</h3></div>
+              <div><span>Creators que sairam</span><h3>{selectedExitDay.date ? date(selectedExitDay.date) : "Selecione um dia"}</h3>{selectedExitDay.date && <button className="dashboard-selection-chip" type="button" onClick={() => setSelectedExitDate("")}>Data ativa: {date(selectedExitDay.date)} ×</button>}</div>
               <div><strong>{integer(selectedExitDay.exits || 0)}</strong><span>desvinculados</span><b>{money(selectedExitDay.exitedGmvPrior30d || 0)}</b><small>GMV previo 30d</small></div>
             </header>
             {selectedExitedCreators.length ? <div className="exit-creators-table-wrap"><table className="exit-creators-table">
@@ -760,7 +837,9 @@ export default function CreatorEconomicsView() {
           </div>
           <footer><span><b>Saldo 30d:</b> entradas observadas menos saidas observadas entre D-29 e D.</span><span>Acima de zero = expansao; abaixo de zero = contracao.</span><em>Entradas incluem primeira aparicao e retornos, para reconciliar exatamente a variacao do estoque ativo.</em></footer>
         </section>
+        </div>}
 
+        {dashboardSection === "retention" && <div className="dashboard-surface" data-dashboard-section="retention">
         <section className="retention-analytics-section">
           <header className="retention-analytics-head">
             <div><span className="affiliation-kicker">Retencao observada</span><h2>Quanto tempo levamos para perder um creator?</h2><p>Duracao dos ciclos que terminaram em uma saida observada, com retorno posterior e GMV previo associado.</p></div>
@@ -794,7 +873,17 @@ export default function CreatorEconomicsView() {
           </div>
           <footer><span>{retention.methodology}</span><b>{retention.caveat}</b></footer>
         </section>
+        <section className="dashboard-table-card" data-dashboard-table="retention">
+          <header><div><span>Detalhamento reativo</span><h2>Retencao mensal</h2></div><small>Eventos completos e janelas parciais identificados</small></header>
+          <div className="dashboard-table-scroll"><table><thead><tr><th>Mes</th><th>Saidas</th><th>Retornos</th><th>Retorno posterior</th><th>GMV previo 30d</th><th>GMV medio por saida</th><th>Janela</th></tr></thead><tbody>{retentionTableRows.slice().reverse().map((row) => <tr key={row.month}><td>{monthLabel(row.month)}</td><td>{integer(row.observedExits)}</td><td>{integer(row.observedReturns)}</td><td>{row.cohortReturnPercentDisplay == null ? "—" : percent(row.cohortReturnPercentDisplay)}</td><td><strong>{money(row.exitedGmvPrior30d)}</strong></td><td>{money(row.avgGmvPrior30dPerExit)}</td><td>{row.completeWindow ? "Completa" : "Parcial"}</td></tr>)}{retentionTableRows.length === 0 && <tr><td colSpan="7"><div className="dashboard-table-empty">Nenhum resultado para os filtros ativos.</div></td></tr>}</tbody></table></div>
+        </section>
+        </div>}
 
+        {dashboardSection === "finance" && <div className="dashboard-surface" data-dashboard-section="finance">
+        <section className="dashboard-table-card" data-dashboard-table="finance">
+          <header><div><span>Detalhamento reativo</span><h2>Fechamento mensal da Creator BU</h2></div><small>Clique no mes para abrir custos e lancamentos</small></header>
+          <div className="dashboard-table-scroll"><table><thead><tr><th>Mes</th><th>Receita Creator BU</th><th>Custo observado</th><th>Premissa salarial</th><th>Custo considerado</th><th>Resultado considerado</th><th>Linhas</th></tr></thead><tbody>{financeTableRows.slice().reverse().map((row) => <tr key={row.month} className={selectedBusinessUnitMonth.month === row.month ? "selected" : ""}><td><button type="button" onClick={() => setBusinessUnitMonth(row.month)} aria-current={selectedBusinessUnitMonth.month === row.month ? "true" : undefined}>{monthLabel(row.month)}</button></td><td>{money(row.revenue)}</td><td>{row.actualCost == null ? "—" : money(row.actualCost)}</td><td>{money(row.assumptionCost)}</td><td>{money(row.consideredCost)}</td><td><strong>{money(row.consideredResult)}</strong></td><td>{integer(row.lineItemCount)}</td></tr>)}{financeTableRows.length === 0 && <tr><td colSpan="7"><div className="dashboard-table-empty">Nenhum resultado para os filtros ativos.</div></td></tr>}</tbody></table></div>
+        </section>
         <section className="creator-bu-section">
           <header className="creator-bu-head">
             <div><span className="profit-kicker">Business Unit Creators</span><h2>Ganho mensal versus gasto mensal</h2><p>Todos os gastos validos disponiveis no Notion e na Meta entram no inventario para revisao. O grafico evita apenas sobreposicoes identificadas entre as fontes.</p></div>
@@ -890,14 +979,16 @@ export default function CreatorEconomicsView() {
 
           <footer><span>{profitability.definitions?.revenue}</span><span>{profitability.definitions?.knownCost}</span><b>{profitability.definitions?.result}</b>{source !== "all" && <em>Visao global: o filtro de origem nao altera esta secao.</em>}</footer>
         </section>
+        </div>}
 
+        {dashboardSection === "portfolio" && <div className="dashboard-surface" data-dashboard-section="portfolio">
         <section className="portfolio-grid">
           <article className="econ-panel monthly-performance">
             <header><div><span>GMV mensal da carteira</span><h2>Volume e creators vendendo</h2></div><small>Soma dos relatorios fechados de um unico dia, sem delta de snapshot acumulado.</small></header>
             <div className="portfolio-chart"><ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 760, height: 330 }}><ComposedChart data={portfolio.monthly || []} margin={{ top: 18, right: 10, left: 5, bottom: 0 }}><CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} /><XAxis dataKey="month" tickFormatter={monthLabel} stroke="#5E6678" tick={{ fontSize: 10 }} /><YAxis yAxisId="gmv" tickFormatter={compactMoney} stroke="#536B91" tick={{ fontSize: 10 }} width={74} /><YAxis yAxisId="people" orientation="right" stroke="#4F887A" tick={{ fontSize: 10 }} width={48} /><Tooltip content={<ChartTooltip moneyKeys={["totalGmv"]} />} /><Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} /><Bar yAxisId="gmv" dataKey="totalGmv" name="GMV mensal" fill="#5277FF" radius={[6, 6, 0, 0]} /><Line yAxisId="people" dataKey="creatorsWithGmv" name="Creators com GMV" stroke="#47D7A0" strokeWidth={3} dot={{ r: 4, strokeWidth: 0 }} /></ComposedChart></ResponsiveContainer></div>
           </article>
 
-          <article className="econ-panel monthly-ranking">
+          <article className="econ-panel monthly-ranking" data-dashboard-table="portfolio">
             <header><div><span>GMV mensal por pessoa</span><h2>Quem moveu o mes</h2></div><select value={selectedPortfolioMonth.month || portfolioMonth} onChange={(event) => setPortfolioMonth(event.target.value)}>{(portfolio.monthly || []).map((item) => <option key={item.month} value={item.month}>{monthLabel(item.month)}</option>)}</select></header>
             <div className="month-health">
               <div><span>GMV</span><strong>{compactMoney(selectedPortfolioMonth.totalGmv)}</strong></div>
@@ -905,7 +996,7 @@ export default function CreatorEconomicsView() {
               <div><span>Mediana</span><strong>{money(selectedPortfolioMonth.medianGmvPerSeller)}</strong></div>
               <div><span>Top 5</span><strong>{percent(selectedPortfolioMonth.top5Share)}</strong></div>
             </div>
-            <div className="ranking-wrap"><table className="monthly-ranking-table"><thead><tr><th>#</th><th>Creator</th><th>GMV mensal</th><th>Share</th><th>Dias</th></tr></thead><tbody>{(selectedPortfolioMonth.topCreators || []).slice(0, 12).map((creator, index) => <tr key={creator.authorId}><td>{index + 1}</td><td><button onClick={() => { setQueryDraft(creator.alias); document.querySelector(".creator-panel")?.scrollIntoView({ behavior: "smooth" }) }}>@{creator.alias || creator.authorId}</button></td><td><strong>{money(creator.gmv)}</strong></td><td>{percent(creator.share)}</td><td>{integer(creator.activeDays)}</td></tr>)}</tbody></table></div>
+            <div className="ranking-wrap"><table className="monthly-ranking-table"><thead><tr><th>#</th><th>Creator</th><th>GMV mensal</th><th>Share</th><th>Dias</th></tr></thead><tbody>{(selectedPortfolioMonth.topCreators || []).slice(0, 12).map((creator, index) => <tr key={creator.authorId}><td>{index + 1}</td><td><button type="button" onClick={() => openCreatorExplorer(creator.alias || creator.authorId)} aria-label={`Abrir raio-X de @${creator.alias || creator.authorId}`}>@{creator.alias || creator.authorId}</button></td><td><strong>{money(creator.gmv)}</strong></td><td>{percent(creator.share)}</td><td>{integer(creator.activeDays)}</td></tr>)}</tbody></table></div>
           </article>
         </section>
 
@@ -953,7 +1044,9 @@ export default function CreatorEconomicsView() {
 
           <footer><span>{tierAnalytics.definition}</span><em>{tierAnalytics.auxiliaryStates}</em>{selectedTierTransition.aboveSafira > 0 && <b>Atencao: {integer(selectedTierTransition.aboveSafira)} movimentos envolveram GMV acima de R$ 1 mi.</b>}</footer>
         </section>}
+        </div>}
 
+        {dashboardSection === "overview" && <div className="dashboard-surface" data-dashboard-section="overview">
         <section className="metric-grid">
           <Metric label="Creators observados" value={integer(summary.observedCreators ?? summary.activeCreators)} note={`${integer(summary.enteredCreators)} apareceram pela primeira vez no relatorio`} />
           <Metric label="Com formulario" value={percent(summary.formMatchRate)} note={`${integer(summary.matchedForms)} @ encontrados na Base de Creators`} tone="blue" />
@@ -980,6 +1073,13 @@ export default function CreatorEconomicsView() {
           </article>
         </section>
 
+        <section className="dashboard-table-card" data-dashboard-table="overview">
+          <header><div><span>Detalhamento reativo</span><h2>Resumo mensal oficial</h2></div><small>{monthLabel(from)} a {monthLabel(to)}</small></header>
+          <div className="dashboard-table-scroll"><table><thead><tr><th>Mes</th><th>Creators observados</th><th>Primeiras aparicoes</th><th>Retornos</th><th>Com formulario</th><th>GMV</th><th>Receita Amplify</th></tr></thead><tbody>{overviewTableRows.slice().reverse().map((row) => <tr key={row.month}><td>{monthLabel(row.month)}</td><td>{integer(row.activeCreators)}</td><td>{integer(row.enteredCreators)}</td><td>{integer(row.returnedCreators)}</td><td>{integer(row.matchedForms)}</td><td>{money(row.gmv)}</td><td><strong>{money(row.estimatedAmplifyRevenue)}</strong></td></tr>)}{overviewTableRows.length === 0 && <tr><td colSpan="7"><div className="dashboard-table-empty">Nenhum resultado para os filtros ativos.</div></td></tr>}</tbody></table></div>
+        </section>
+        </div>}
+
+        {dashboardSection === "acquisition" && <div className="dashboard-surface" data-dashboard-section="acquisition">
         <section className="econ-panel source-panel">
           <header><div><span>Canal de origem</span><h2>Quem trouxe GMV, nao apenas lead</h2></div><small>Origem nao identificada entra em Meta por perda de tracking</small></header>
           <div className="source-table-wrap"><table className="source-table"><thead><tr><th>Origem</th><th>Creators observados</th><th>First-touch no periodo</th><th>Com formulario</th><th>GMV</th><th>Receita Amplify</th><th>LTV medio observado</th></tr></thead><tbody>{data.sourceBreakdown.map((row) => <tr key={row.key}><td><button onClick={() => { setSource(row.key); setPage(1) }}>{row.label}</button></td><td>{integer(row.creators)}</td><td>{integer(row.acquired)}</td><td>{percent(row.formMatchRate)}</td><td>{money(row.gmv)}</td><td><strong>{money(row.estimatedAmplifyRevenue)}</strong></td><td>{money(row.avgObservedLtv)}</td></tr>)}</tbody></table></div>
@@ -990,18 +1090,30 @@ export default function CreatorEconomicsView() {
           <div className="source-table-wrap"><table className="source-table"><thead><tr><th>Sistema first-touch</th><th>Creators observados</th><th>First-touch no periodo</th><th>Com formulario</th><th>GMV</th><th>Receita Amplify</th><th>LTV medio observado</th></tr></thead><tbody>{data.systemBreakdown.map((row) => <tr key={row.key}><td><span className="origin-tag">{row.label}</span></td><td>{integer(row.creators)}</td><td>{integer(row.acquired)}</td><td>{percent(row.formMatchRate)}</td><td>{money(row.gmv)}</td><td><strong>{money(row.estimatedAmplifyRevenue)}</strong></td><td>{money(row.avgObservedLtv)}</td></tr>)}</tbody></table></div>
         </section>
 
-        <section className="econ-panel creator-panel">
-          <header className="creator-head"><div><span>Raio-X por creator</span><h2>Do @ ao retorno financeiro</h2></div><div className="creator-tools"><div className="search"><span>@</span><input value={queryDraft} onChange={(event) => setQueryDraft(event.target.value)} placeholder="Buscar creator ou alias" /></div><select value={sort} onChange={(event) => { setSort(event.target.value); setPage(1) }}><option value="revenue">Receita no periodo</option><option value="lifetime">LTV observado</option><option value="gmv">GMV no periodo</option><option value="days">Dias vinculados</option><option value="ltvCac">LTV / CAC</option><option value="handle">@ alfabetico</option></select></div></header>
+        <section className="econ-panel creator-panel" data-dashboard-table="acquisition">
+          <header className="creator-head"><div><span>Raio-X por creator</span><h2>Do @ ao retorno financeiro</h2></div><div className="creator-tools"><div className="search"><span>@</span><input aria-label="Buscar creator ou alias" value={queryDraft} onChange={(event) => setQueryDraft(event.target.value)} placeholder="Buscar creator ou alias" /></div><select value={sort} onChange={(event) => { setSort(event.target.value); setPage(1) }}><option value="revenue">Receita no periodo</option><option value="lifetime">LTV observado</option><option value="gmv">GMV no periodo</option><option value="days">Dias vinculados</option><option value="ltvCac">LTV / CAC</option><option value="handle">@ alfabetico</option></select></div></header>
           <div className="source-pills"><button className={source === "all" ? "active" : ""} onClick={() => { setSource("all"); setPage(1) }}>Todas as origens</button>{data.sourceOptions.map((item) => <button key={item.key} className={source === item.key ? "active" : ""} onClick={() => { setSource(item.key); setPage(1) }}>{item.label}<b>{integer(item.creators)}</b></button>)}</div>
           <div className="creator-table-wrap"><table className="creator-table"><thead><tr><th>Creator</th><th>Origem</th><th>Formulario</th><th>Dias</th><th>GMV periodo</th><th>Receita periodo</th><th>LTV observado</th><th>CAC alocado</th><th>LTV/CAC</th><th /></tr></thead><tbody>{data.creators.map((creator) => <FragmentRow key={creator.id} creator={creator} expanded={expanded === creator.id} onToggle={() => setExpanded(expanded === creator.id ? "" : creator.id)} />)}{data.creators.length === 0 && <tr><td colSpan="10"><div className="creator-empty"><strong>Nenhum creator ou alias encontrado.</strong><button onClick={() => setQueryDraft("")}>Limpar busca</button></div></td></tr>}</tbody></table></div>
           <footer className="pagination"><span>{integer(data.pagination.total)} creators encontrados</span><div><button disabled={data.pagination.page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>← Anterior</button><b>{data.pagination.page} / {data.pagination.pages}</b><button disabled={data.pagination.page >= data.pagination.pages} onClick={() => setPage((value) => value + 1)}>Proxima →</button></div></footer>
         </section>
+        </div>}
 
-        <footer className="econ-method">
+        {dashboardSection === "overview" && <footer className="econ-method">
           <div><span>Agenciados por dia</span><p>{data.caveats[9]}</p></div><div><span>Saidas e GMV 30d</span><p>{data.caveats[10]} {data.caveats[11]}</p></div><div><span>Receita, nao lucro</span><p>{data.caveats[1]}</p></div><div><span>Identidade</span><p>{data.methodology.identity} {data.methodology.form}</p></div><div><span>CAC</span><p>{data.caveats[2]}</p></div><div><span>Indique / Super</span><p>{data.caveats[7]}</p></div><div><span>GMV por @</span><p>{data.caveats[8]}</p></div><div><span>Periodo e retorno</span><p>{data.caveats[5]} {data.caveats[6]}</p></div><div><span>Atualizacao</span><p>Snapshot gerado em {new Date(data.generatedAt).toLocaleString("pt-BR")}. Janela comum fechada de {date(data.period?.from)} a {date(data.period?.to)}.</p></div>
-        </footer>
+        </footer>}
       </>}
     </div>
+
+    <style jsx global>{`
+      .creator-dashboard-nav{position:sticky;top:72px;z-index:19;display:flex;gap:8px;margin:16px 0 24px;padding:8px;overflow-x:auto;overscroll-behavior-inline:contain;border:1px solid rgba(255,255,255,.09);border-radius:16px;background:rgba(8,11,18,.94);box-shadow:0 14px 40px rgba(0,0,0,.3);backdrop-filter:blur(18px);scrollbar-width:thin}.creator-dashboard-nav button{min-width:146px;min-height:52px;display:grid;align-content:center;gap:3px;padding:8px 12px;border:1px solid transparent;border-radius:11px;background:transparent;color:#8B94A7;text-align:left;cursor:pointer;transition:.18s ease}.creator-dashboard-nav button:hover,.creator-dashboard-nav button:focus-visible{border-color:rgba(84,216,232,.32);color:#DCE5F3;outline:0}.creator-dashboard-nav button.active{border-color:rgba(84,216,232,.45);background:linear-gradient(135deg,rgba(84,216,232,.16),rgba(169,155,255,.09));color:#F7FAFF;box-shadow:inset 0 0 0 1px rgba(84,216,232,.08)}.creator-dashboard-nav span{font-size:11px;font-weight:800;white-space:nowrap}.creator-dashboard-nav small{color:#657086;font:600 8px ui-monospace,monospace;white-space:nowrap}.creator-dashboard-nav button.active small{color:#87A7AF}
+      .dashboard-surface{animation:dashboardSurfaceIn .24s ease both;min-width:0}@keyframes dashboardSurfaceIn{from{opacity:.3;transform:translateY(5px)}to{opacity:1;transform:none}}
+      .dashboard-table-card{margin:18px 0 24px;border:1px solid rgba(84,216,232,.2);border-radius:17px;background:linear-gradient(145deg,rgba(84,216,232,.045),#0A0E16 34%);overflow:hidden}.dashboard-table-card>header{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;padding:18px 20px;border-bottom:1px solid rgba(255,255,255,.07)}.dashboard-table-card>header span{display:block;color:#54D8E8;font:750 8px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.1em}.dashboard-table-card h2{margin:5px 0 0;color:#EEF3FA;font-size:20px;letter-spacing:-.025em}.dashboard-table-card>header small{color:#778195;font:600 9px ui-monospace,monospace}.dashboard-table-scroll{width:100%;max-height:520px;overflow:auto}.dashboard-table-scroll table{width:100%;min-width:820px;border-collapse:collapse}.dashboard-table-scroll th{position:sticky;top:0;z-index:2;padding:11px 14px;background:#0C111B;color:#727D91;font:750 8px ui-monospace,monospace;text-align:left;text-transform:uppercase;letter-spacing:.05em;white-space:nowrap}.dashboard-table-scroll td{padding:11px 14px;border-top:1px solid rgba(255,255,255,.055);color:#B9C0CE;font-size:10px;white-space:nowrap}.dashboard-table-scroll tr:hover td{background:rgba(84,216,232,.035)}.dashboard-table-scroll td strong{color:#F1F4F9}.dashboard-table-empty{min-height:130px;display:grid;place-items:center;color:#7E8799}
+      .dashboard-selection-chip{min-height:44px;margin-top:8px;padding:8px 12px;border:1px solid rgba(84,216,232,.35);border-radius:999px;background:rgba(84,216,232,.09);color:#BFF8FF;font:750 9px ui-monospace,monospace;cursor:pointer}.dashboard-selection-chip:hover,.dashboard-selection-chip:focus-visible{border-color:#54D8E8;outline:0}
+      .global-filter-chip{min-height:44px;padding:8px 13px;border:1px solid rgba(246,184,75,.42);border-radius:999px;background:rgba(246,184,75,.1);color:#FFD78F;font:750 9px ui-monospace,monospace;cursor:pointer}.global-filter-chip:hover,.global-filter-chip:focus-visible{border-color:#F6B84B;outline:2px solid transparent}.dashboard-table-scroll td>button{min-height:44px;border:0;background:transparent;color:#BFF8FF;font:inherit;font-weight:750;text-decoration:underline;text-underline-offset:3px;cursor:pointer}.dashboard-table-scroll tr.selected td{background:rgba(84,216,232,.075)}
+      .movement-split-grid,.movement-ranking-grid{display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid rgba(255,255,255,.07)}.movement-split-grid>article,.movement-ranking-grid>article{min-width:0;border-right:1px solid rgba(255,255,255,.07)}.movement-split-grid>article:last-child,.movement-ranking-grid>article:last-child{border-right:0}.movement-split-grid article>header,.movement-ranking-grid article>header{padding:16px 18px 5px}.movement-split-grid article>header span,.movement-ranking-grid article>header span{color:#7C8698;font:750 8px ui-monospace,monospace;text-transform:uppercase}.movement-split-grid h3,.movement-ranking-grid h3{margin:5px 0 0;color:#EDF2F8;font-size:18px}.movement-split-chart{height:310px;padding:0 8px 14px}.movement-ranking-grid ol{list-style:none;margin:0;padding:8px 14px 16px;counter-reset:rank}.movement-ranking-grid li{counter-increment:rank}.movement-ranking-grid button{width:100%;min-height:44px;display:grid;grid-template-columns:28px 1fr auto;align-items:center;gap:8px;padding:8px 10px;border:0;border-bottom:1px solid rgba(255,255,255,.055);background:transparent;color:#AEB6C5;text-align:left;cursor:pointer}.movement-ranking-grid button:before{content:counter(rank);display:grid;place-items:center;width:24px;height:24px;border-radius:7px;background:rgba(255,255,255,.06);color:#737D90;font:700 9px ui-monospace,monospace}.movement-ranking-grid button:hover,.movement-ranking-grid button:focus-visible{background:rgba(84,216,232,.06);outline:0}.movement-ranking-grid button strong{color:#F1F4F9;font-size:11px}
+      @media(max-width:820px){.creator-dashboard-nav{top:68px;margin-left:-4px;margin-right:-4px;border-radius:13px}.creator-dashboard-nav button{min-width:132px}.movement-split-grid,.movement-ranking-grid{grid-template-columns:1fr}.movement-split-grid>article,.movement-ranking-grid>article{border-right:0;border-bottom:1px solid rgba(255,255,255,.07)}.dashboard-table-card>header{display:grid}.dashboard-table-card>header small{text-align:left}}
+      @media(max-width:560px){.creator-dashboard-nav{padding:6px}.creator-dashboard-nav button{min-width:122px;min-height:48px;padding:7px 10px}.creator-dashboard-nav small{display:none}.movement-split-chart{height:285px}.dashboard-table-card{border-radius:14px}.dashboard-table-card>header{padding:16px}.dashboard-table-scroll td,.dashboard-table-scroll th{padding-left:11px;padding-right:11px}}
+    `}</style>
 
     <style jsx global>{`
       :root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#070910!important;color:#F4F6FF!important}.economics-page{min-height:100vh;background:radial-gradient(circle at 78% 4%,rgba(155,140,255,.13),transparent 28%),radial-gradient(circle at 12% 48%,rgba(49,87,255,.08),transparent 26%),#070910;font-family:Inter,system-ui,sans-serif}.econ-topbar{height:64px;display:flex;align-items:center;justify-content:space-between;padding:0 max(24px,calc((100vw - 1480px)/2));border-bottom:1px solid rgba(255,255,255,.08);background:rgba(7,9,16,.86);backdrop-filter:blur(18px);position:sticky;top:0;z-index:20}.econ-brand{display:flex;align-items:center;gap:10px;text-decoration:none;color:#fff;font-weight:800}.econ-brand b{display:grid;place-items:center;width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#3157FF 0 48%,#EA1A4E 48%);font-size:13px}.econ-brand small{color:#697185;font-family:ui-monospace,monospace;font-weight:500}.econ-back{color:#8E95A8;text-decoration:none;font-size:13px}.econ-wrap{max-width:1480px;margin:auto;padding:42px 24px 72px}.econ-hero{min-height:300px;display:grid;grid-template-columns:minmax(0,1.55fr) minmax(280px,.45fr);gap:44px;align-items:center;border-bottom:1px solid rgba(255,255,255,.08)}.econ-kicker{font:700 11px ui-monospace,monospace;letter-spacing:.17em;text-transform:uppercase;color:#A7AFC1}.econ-kicker i{display:inline-block;width:7px;height:7px;border-radius:50%;background:#47D7A0;box-shadow:0 0 14px #47D7A0;margin-right:8px}.econ-hero h1{font-size:clamp(54px,7vw,94px);line-height:.88;letter-spacing:-.065em;margin:22px 0 24px}.econ-hero h1 em{font-style:normal;color:transparent;-webkit-text-stroke:1px rgba(244,246,255,.52)}.econ-hero p{max-width:760px;color:#969DAF;font-size:16px;line-height:1.65}.hero-formula{border:1px solid rgba(71,215,160,.3);background:linear-gradient(145deg,rgba(71,215,160,.13),rgba(14,18,28,.86));padding:28px;border-radius:20px;box-shadow:0 25px 70px rgba(0,0,0,.25)}.hero-formula>span{font:700 10px ui-monospace;text-transform:uppercase;letter-spacing:.12em;color:#74E4B8}.hero-formula>strong{display:block;font-size:76px;line-height:1;margin:16px 0 6px;letter-spacing:-.07em}.hero-formula p{font-size:13px;margin:0 0 14px;color:#C8D0DC}.hero-formula small{color:#6F788B}.econ-controls{display:flex;align-items:center;justify-content:space-between;gap:22px;padding:18px 0}.month-control{display:flex;align-items:end;gap:10px}.month-control label{display:grid;gap:5px;color:#727B8E;font:700 9px ui-monospace;text-transform:uppercase}.month-control input,.creator-tools select{border:1px solid rgba(255,255,255,.1);background:#0E121C;color:#E8EBF3;border-radius:9px;padding:9px 11px;font:600 12px Inter}.month-control>span{padding-bottom:10px;color:#50586A}.trust-row{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}.trust-pill{display:inline-flex;align-items:center;gap:7px;border:1px solid rgba(255,255,255,.1);border-radius:999px;padding:7px 10px;font:700 9px ui-monospace;text-transform:uppercase;color:#8D96A8;background:rgba(255,255,255,.025)}.trust-pill i{width:6px;height:6px;border-radius:50%}.trust-pill.ok i{background:#47D7A0;box-shadow:0 0 8px #47D7A0}.trust-pill.warn i{background:#F6B84B}.metric-grid{display:grid;grid-template-columns:repeat(6,1fr);border:1px solid rgba(255,255,255,.09);border-radius:18px;overflow:hidden;background:#0B0E16}.econ-metric{padding:22px 18px;min-width:0;border-right:1px solid rgba(255,255,255,.07);box-shadow:inset 0 3px 0 var(--tone)}.econ-metric:last-child{border:0}.econ-metric.violet{--tone:#9B8CFF}.econ-metric.blue{--tone:#5A8CFF}.econ-metric.cyan{--tone:#39CFE2}.econ-metric.green{--tone:#47D7A0}.econ-metric.amber{--tone:#F6B84B}.econ-metric.rose{--tone:#FF6D8D}.econ-metric span,.paid-callout span{display:block;color:#7D8598;font:700 9px ui-monospace;text-transform:uppercase;letter-spacing:.1em}.econ-metric strong{display:block;margin:10px 0 7px;font-size:clamp(19px,1.7vw,27px);letter-spacing:-.045em;white-space:nowrap}.econ-metric small{color:#626B7D;font-size:10px;line-height:1.4}.paid-callout{margin:14px 0 18px;display:grid;grid-template-columns:1.6fr .7fr .8fr;border:1px solid rgba(246,184,75,.18);background:rgba(246,184,75,.045);border-radius:14px;overflow:hidden}.paid-callout>div{padding:17px 20px;border-right:1px solid rgba(255,255,255,.06)}.paid-callout>div:last-child{border:0}.paid-callout strong{display:block;margin:7px 0 4px;font-size:17px}.paid-callout p,.paid-callout small{margin:0;color:#727B8D;font-size:10px;line-height:1.5}.chart-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.econ-panel{border:1px solid rgba(255,255,255,.09);background:#0B0E16;border-radius:18px;overflow:hidden}.econ-panel>header{display:flex;justify-content:space-between;align-items:end;gap:20px;padding:22px 24px;border-bottom:1px solid rgba(255,255,255,.07)}.econ-panel>header span{color:#8B94A8;font:700 9px ui-monospace;text-transform:uppercase;letter-spacing:.11em}.econ-panel h2{margin:7px 0 0;font-size:23px;letter-spacing:-.035em}.econ-panel>header small{max-width:310px;color:#687185;font-size:10px;text-align:right;line-height:1.45}.chart-box{height:330px;padding:12px 9px 18px}.chart-tip{min-width:170px;padding:12px;background:#10151F;border:1px solid rgba(255,255,255,.12);border-radius:10px;box-shadow:0 18px 50px rgba(0,0,0,.4)}.chart-tip>strong{display:block;margin-bottom:7px}.chart-tip>div{display:grid;grid-template-columns:7px 1fr auto;align-items:center;gap:7px;color:#8F98AA;font-size:10px;padding:3px 0}.chart-tip i{width:7px;height:7px;border-radius:2px}.chart-tip b{color:#F3F5FA}.source-panel,.creator-panel{margin-top:16px}.source-table-wrap,.creator-table-wrap{overflow:auto}.source-table,.creator-table{width:100%;border-collapse:collapse;white-space:nowrap}.source-table th,.creator-table th{text-align:right;color:#626B7E;font:700 8px ui-monospace;text-transform:uppercase;letter-spacing:.08em;padding:12px 16px;border-bottom:1px solid rgba(255,255,255,.07)}.source-table th:first-child,.source-table td:first-child,.creator-table th:first-child,.creator-table td:first-child{text-align:left}.source-table td,.creator-table td{text-align:right;padding:13px 16px;border-bottom:1px solid rgba(255,255,255,.055);font-size:11px;color:#A8B0BF}.source-table tr:hover td,.creator-table tr.creator-row:hover td{background:rgba(255,255,255,.022)}.source-table button{border:0;background:transparent;color:#F0F2F7;font-weight:750;cursor:pointer}.creator-head{align-items:center!important}.creator-tools{display:flex;gap:8px}.search{display:flex;align-items:center;border:1px solid rgba(255,255,255,.1);background:#0E121C;border-radius:9px;padding:0 10px;color:#6C7588}.search input{width:210px;border:0;outline:0;background:transparent;color:#fff;padding:10px 7px}.source-pills{display:flex;gap:7px;padding:14px 16px;overflow:auto;border-bottom:1px solid rgba(255,255,255,.07)}.source-pills button{flex:0 0 auto;border:1px solid rgba(255,255,255,.09);background:rgba(255,255,255,.02);color:#7F889B;border-radius:999px;padding:7px 10px;font:700 9px Inter;cursor:pointer}.source-pills button.active{border-color:rgba(155,140,255,.45);background:rgba(155,140,255,.12);color:#C9C1FF}.source-pills b{margin-left:7px;color:#555F73}.creator-name{display:flex;align-items:center;gap:9px}.creator-name i{width:26px;height:26px;display:grid;place-items:center;border-radius:8px;background:rgba(155,140,255,.1);color:#AA9EFF;font-style:normal;font-weight:850}.creator-name strong{color:#F2F4F8}.origin-tag,.form-tag{display:inline-flex;border:1px solid rgba(255,255,255,.09);border-radius:999px;padding:5px 8px;color:#9DA6B6;font-size:9px}.form-tag.yes{color:#74E4B8;border-color:rgba(71,215,160,.22);background:rgba(71,215,160,.06)}.return-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:#F6B84B;margin-left:5px}.expand-button{width:28px;height:28px;border:1px solid rgba(255,255,255,.1);background:transparent;color:#8C95A8;border-radius:8px;cursor:pointer}.creator-detail-cell{padding:0!important;text-align:left!important;background:#090C13}.creator-detail{padding:18px 20px 22px}.detail-evidence{display:grid;grid-template-columns:repeat(5,1fr);gap:9px}.detail-evidence>div{min-width:0;padding:13px;border:1px solid rgba(255,255,255,.07);background:#0D111A;border-radius:10px}.detail-evidence span{display:block;color:#697286;font:700 8px ui-monospace;text-transform:uppercase}.detail-evidence strong{display:block;margin:6px 0 4px;font-size:12px}.detail-evidence small{display:block;color:#7B8497;font-size:9px;line-height:1.5;overflow-wrap:anywhere;white-space:normal}.month-tape{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:7px;margin-top:10px}.month-tape>div{position:relative;overflow:hidden;padding:11px;border:1px solid rgba(255,255,255,.06);border-radius:9px}.month-tape span,.month-tape small{display:block;color:#6E7789;font-size:8px}.month-tape strong{display:block;margin:5px 0;font-size:11px}.month-tape i{position:absolute;left:0;bottom:0;height:2px;background:#47D7A0}.pagination{display:flex;align-items:center;justify-content:space-between;padding:15px 18px;color:#70798B;font-size:10px}.pagination>div{display:flex;align-items:center;gap:12px}.pagination button{border:1px solid rgba(255,255,255,.09);background:#0E121C;color:#AEB5C2;border-radius:8px;padding:8px 10px;cursor:pointer}.pagination button:disabled{opacity:.35;cursor:not-allowed}.econ-method{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;margin-top:16px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.07);border-radius:14px;overflow:hidden}.econ-method>div{background:#090C13;padding:17px}.econ-method span{color:#8B94A8;font:700 8px ui-monospace;text-transform:uppercase}.econ-method p{margin:7px 0 0;color:#697286;font-size:9px;line-height:1.55}.econ-loading,.econ-error{min-height:280px;display:grid;place-items:center;align-content:center;gap:12px;border:1px solid rgba(255,255,255,.08);border-radius:16px;color:#858EA1}.econ-loading i{width:24px;height:24px;border:2px solid rgba(255,255,255,.12);border-top-color:#9B8CFF;border-radius:50%;animation:spin .8s linear infinite}.econ-error strong{color:#FF809A}@keyframes spin{to{transform:rotate(360deg)}}
