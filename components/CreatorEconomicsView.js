@@ -2,7 +2,7 @@
 /* eslint-disable react-hooks/set-state-in-effect -- loading state is reset when the request identity changes */
 
 import { useEffect, useMemo, useState } from "react"
-import { Area, Bar, CartesianGrid, ComposedChart, Legend, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
+import { Area, Bar, CartesianGrid, ComposedChart, Legend, Line, ReferenceLine, ResponsiveContainer, Scatter, Tooltip, XAxis, YAxis } from "recharts"
 import { deriveCreatorBaseHealth } from "../lib/creator-base-health.mjs"
 import { CREATOR_DASHBOARD_SECTIONS, filterDashboardRows, normalizeCreatorDashboardSection } from "../lib/creator-dashboard.mjs"
 
@@ -94,6 +94,13 @@ function WeeklyGmvTooltip({ active, payload, label }) {
 function MovementTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null
   return <div className="chart-tip movement-tip"><strong>{date(label)}</strong>{payload.filter((item) => item.value != null).map((item) => <div key={item.dataKey}><i style={{ background: item.color }} /><span>{item.name}</span><b>{item.dataKey === "exitedGmvPrior30d" ? money(item.value) : integer(item.value)}</b></div>)}</div>
+}
+
+function LostGmvShareTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null
+  const item = payload.find((entry) => entry.payload)?.payload
+  if (!item) return null
+  return <div className="chart-tip movement-tip"><strong>{date(label)}</strong><div><i style={{ background: "#54D8E8" }} /><span>Desvinculados</span><b>{integer(item.exits)}</b></div><div><i style={{ background: "#FF647C" }} /><span>Percentual de GMV 30d perdido</span><b>{percent(item.lostGmvPercentOfRemainingBase)}</b></div><div><i style={{ background: "#A94D5E" }} /><span>GMV previo dos que sairam</span><b>{money(item.exitedGmvPrior30d)}</b></div><div><i style={{ background: "#727B8C" }} /><span>GMV previo da base remanescente</span><b>{money(item.remainingAffiliatedGmvPrior30d)}</b></div></div>
 }
 
 function signedInteger(value) {
@@ -733,23 +740,23 @@ export default function CreatorEconomicsView() {
             <div><span>Desvinculados no periodo</span><strong>{integer(visibleExitEvents)}</strong><small>eventos dentro da janela selecionada</small></div>
             <div><span>GMV previo 30d associado</span><strong>{compactMoney(visibleExitGmvPrior30d)}</strong><small>soma dos 30 dias anteriores a cada saida</small></div>
           </div>
-          {exitChartView === "combined" && <div className="movement-chart" role="img" aria-label="Grafico combinado: barras corais representam desvinculados; linha ciano representa GMV previo 30 dias">
+          {exitChartView === "combined" && <div className="movement-chart" role="img" aria-label="Grafico combinado: pontos azuis representam desvinculados; linha vermelha representa GMV previo 30 dias">
             <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 1320, height: 350 }}>
               <ComposedChart data={movementChartData} margin={{ top: 20, right: 12, left: -2, bottom: 0 }} onClick={(event) => { if (event?.activeLabel) setSelectedExitDate(event.activeLabel) }}>
                 <CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} />
                 <XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#5E6678" tick={{ fontSize: 10 }} minTickGap={30} />
                 <YAxis yAxisId="people" stroke="#6B7180" tick={{ fontSize: 10 }} width={42} />
-                <YAxis yAxisId="gmv" orientation="right" tickFormatter={compactMoney} stroke="#3F8E9A" tick={{ fontSize: 10 }} width={72} />
+                <YAxis yAxisId="gmv" orientation="right" tickFormatter={compactMoney} stroke="#A94D5E" tick={{ fontSize: 10 }} width={72} />
                 <Tooltip content={<MovementTooltip />} /><Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} />
                 {selectedExitDay.date && <ReferenceLine yAxisId="people" x={selectedExitDay.date} stroke="#F4F6FF" strokeOpacity={0.5} strokeDasharray="3 4" />}
-                <Bar yAxisId="people" dataKey="exits" name="Desvinculados · barras" fill="#FF647C" radius={[3, 3, 0, 0]} cursor="pointer" />
-                <Line yAxisId="gmv" type="monotone" dataKey="exitedGmvPrior30d" name="GMV previo 30d · linha" stroke="#54D8E8" strokeWidth={3} dot={false} activeDot={{ r: 5, cursor: "pointer" }} connectNulls={false} />
+                <Scatter yAxisId="people" dataKey="exits" name="Desvinculados · pontos" fill="#54D8E8" cursor="pointer" />
+                <Line yAxisId="gmv" type="monotone" dataKey="exitedGmvPrior30d" name="GMV previo 30d · linha" stroke="#FF647C" strokeWidth={3} dot={false} activeDot={{ r: 5, cursor: "pointer" }} connectNulls={false} />
               </ComposedChart>
             </ResponsiveContainer>
           </div>}
           {exitChartView === "split" && <div className="movement-split-grid">
-            <article><header><span>Quantidade</span><h3>Desvinculados por dia</h3></header><div className="movement-split-chart"><ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 640, height: 300 }}><ComposedChart data={movementChartData} margin={{ top: 14, right: 8, left: -8, bottom: 0 }} onClick={(event) => { if (event?.activeLabel) setSelectedExitDate(event.activeLabel) }}><CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} /><XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#5E6678" tick={{ fontSize: 9 }} minTickGap={26} /><YAxis allowDecimals={false} stroke="#8E5C67" tick={{ fontSize: 9 }} width={42} /><Tooltip content={<MovementTooltip />} />{selectedExitDay.date && <ReferenceLine x={selectedExitDay.date} stroke="#F4F6FF" strokeOpacity={0.45} strokeDasharray="3 4" />}<Bar dataKey="exits" name="Desvinculados" fill="#FF647C" radius={[3, 3, 0, 0]} cursor="pointer" /></ComposedChart></ResponsiveContainer></div></article>
-            <article><header><span>Valor associado</span><h3>GMV previo 30d por saida</h3></header><div className="movement-split-chart"><ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 640, height: 300 }}><ComposedChart data={movementChartData} margin={{ top: 14, right: 8, left: 2, bottom: 0 }} onClick={(event) => { if (event?.activeLabel) setSelectedExitDate(event.activeLabel) }}><CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} /><XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#5E6678" tick={{ fontSize: 9 }} minTickGap={26} /><YAxis tickFormatter={compactMoney} stroke="#3F8E9A" tick={{ fontSize: 9 }} width={66} /><Tooltip content={<MovementTooltip />} />{selectedExitDay.date && <ReferenceLine x={selectedExitDay.date} stroke="#F4F6FF" strokeOpacity={0.45} strokeDasharray="3 4" />}<Area type="monotone" dataKey="exitedGmvPrior30d" name="GMV previo 30d" stroke="#54D8E8" fill="rgba(84,216,232,.14)" strokeWidth={3} dot={false} /></ComposedChart></ResponsiveContainer></div></article>
+            <article><header><span>Quantidade</span><h3>Desvinculados por dia</h3></header><div className="movement-split-chart"><ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 640, height: 300 }}><ComposedChart data={movementChartData} margin={{ top: 14, right: 8, left: -8, bottom: 0 }} onClick={(event) => { if (event?.activeLabel) setSelectedExitDate(event.activeLabel) }}><CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} /><XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#5E6678" tick={{ fontSize: 9 }} minTickGap={26} /><YAxis allowDecimals={false} stroke="#3F8E9A" tick={{ fontSize: 9 }} width={42} /><Tooltip content={<MovementTooltip />} />{selectedExitDay.date && <ReferenceLine x={selectedExitDay.date} stroke="#F4F6FF" strokeOpacity={0.45} strokeDasharray="3 4" />}<Scatter dataKey="exits" name="Desvinculados · pontos" fill="#54D8E8" cursor="pointer" /></ComposedChart></ResponsiveContainer></div></article>
+            <article><header><span>Valor associado</span><h3>GMV previo 30d por saida</h3></header><div className="movement-split-chart"><ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 640, height: 300 }}><ComposedChart data={movementChartData} margin={{ top: 14, right: 8, left: 2, bottom: 0 }} onClick={(event) => { if (event?.activeLabel) setSelectedExitDate(event.activeLabel) }}><CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} /><XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#5E6678" tick={{ fontSize: 9 }} minTickGap={26} /><YAxis tickFormatter={compactMoney} stroke="#A94D5E" tick={{ fontSize: 9 }} width={66} /><Tooltip content={<MovementTooltip />} />{selectedExitDay.date && <ReferenceLine x={selectedExitDay.date} stroke="#F4F6FF" strokeOpacity={0.45} strokeDasharray="3 4" />}<Line type="monotone" dataKey="exitedGmvPrior30d" name="GMV previo 30d · linha" stroke="#FF647C" strokeWidth={3} dot={false} connectNulls={false} /></ComposedChart></ResponsiveContainer></div></article>
           </div>}
           {exitChartView === "ranking" && <div className="movement-ranking-grid">
             <article><header><span>Top 10 dias</span><h3>Mais desvinculacoes</h3></header><ol>{exitRankingByEvents.map((row) => <li key={`events-${row.date}`}><button type="button" onClick={() => setSelectedExitDate(row.date)}><span>{date(row.date)}</span><strong>{integer(row.exits)} creators</strong></button></li>)}</ol></article>
@@ -766,6 +773,31 @@ export default function CreatorEconomicsView() {
             </table></div> : <div className="exit-creators-empty">Nenhum creator saiu no dia selecionado.</div>}
           </div>
           <footer><span>{portfolio.definitions?.exit}</span><b>{portfolio.definitions?.gmvPrior30d}</b>{source !== "all" && <em>Visao global: filtro de origem nao aplicado.</em>}</footer>
+        </section>
+
+        <section className="lost-gmv-share-section affiliation-movement-copy">
+          <header className="affiliation-movement-head">
+            <div><span className="affiliation-kicker">Impacto diario das saidas</span><h2>Percentual de GMV 30d perdido</h2><p>Compara o potencial recente dos creators que sairam com o potencial da base que permaneceu vinculada no mesmo dia.</p></div>
+            <div className="daily-movement-latest">
+              <div><span>Desvinculados em {date(latestMovement.date)}</span><strong style={{ color: "#54D8E8" }}>{integer(latestMovement.exits)}</strong></div>
+              <div><span>GMV 30d perdido</span><strong className="negative">{latestMovement.lostGmvPercentOfRemainingBase == null ? "—" : percent(latestMovement.lostGmvPercentOfRemainingBase)}</strong></div>
+            </div>
+          </header>
+          <div className="affiliation-movement-chart" role="img" aria-label="Pontos azuis mostram desvinculados por dia; linha vermelha mostra o percentual de GMV previo 30 dias perdido">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 1240, height: 390 }}>
+              <ComposedChart data={movementChartData} margin={{ top: 20, right: 12, left: -4, bottom: 2 }}>
+                <CartesianGrid stroke="rgba(255,255,255,.055)" vertical={false} />
+                <XAxis dataKey="date" tickFormatter={(value) => date(value).slice(0, 5)} stroke="#5E6678" tick={{ fontSize: 10 }} minTickGap={32} />
+                <YAxis yAxisId="people" allowDecimals={false} stroke="#3F8E9A" tick={{ fontSize: 10 }} width={52} domain={[0, "dataMax + 10"]} />
+                <YAxis yAxisId="percent" orientation="right" tickFormatter={percent} stroke="#A94D5E" tick={{ fontSize: 10 }} width={58} domain={[0, "auto"]} />
+                <Tooltip content={<LostGmvShareTooltip />} />
+                <Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} />
+                <Scatter yAxisId="people" dataKey="exits" name="Desvinculados · pontos azuis" fill="#54D8E8" />
+                <Line yAxisId="percent" type="monotone" dataKey="lostGmvPercentOfRemainingBase" name="Percentual de GMV 30d perdido" stroke="#FF647C" strokeWidth={3} dot={false} activeDot={{ r: 5 }} connectNulls={false} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+          <footer><span><b>Numerador:</b> GMV previo 30d dos creators que sairam no dia.</span><span><b>Denominador:</b> GMV previo 30d da base que permaneceu vinculada no dia.</span><em>Formula: numerador ÷ denominador × 100. Os primeiros 30 dias incompletos nao recebem percentual. O seletor 30d, 60d ou Tudo do bloco acima controla este grafico.</em></footer>
         </section>
 
         <section className="affiliation-movement-copy affiliation-returns-only">
