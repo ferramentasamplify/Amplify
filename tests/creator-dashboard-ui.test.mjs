@@ -77,9 +77,20 @@ test("section and movement controls expose navigation and pressed state", () => 
   assert.match(source, /aria-pressed=\{exitChartView === "combined"\}/)
   assert.match(source, /aria-pressed=\{movementWindow === "30"\}/)
 })
-
 test("tested row filtering is connected to rendered dashboard tables", () => {
   assert.match(source, /filterDashboardRows/)
   assert.match(source, /overviewTableRows/)
   assert.match(source, /baseTableRows/)
+  assert.match(source, /activationTableRows/)
+  assert.match(source, /retentionTableRows/)
+  assert.match(source, /financeTableRows/)
+})
+
+test("rolling 30-day GMV copy requires the creator to remain affiliated on the analyzed day", () => {
+  assert.match(source, /vinculados no dia que tiveram algum GMV na data ou nos 29 dias anteriores/)
+  assert.match(source, /continua vinculado na data analisada/)
+})
+
+test("mobile header does not let sticky navigation cover dashboard content", () => {
+  assert.match(source, /@media\(max-width:560px\)\{\.econ-topbar\{background:#070910;backdrop-filter:none\}\.creator-dashboard-nav\{position:relative;top:auto;margin-left:0;margin-right:0/)
 })
