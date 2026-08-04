@@ -2,6 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { getRetencaoCanonicalPeriod } from "@/lib/retencao-canonical-data";
 import { aggregateTikTokSnapshots, listTikTokSnapshots } from "@/lib/tiktok-shop-snapshots";
 
 const TIKTOK_DASHBOARD_DATA = path.join(process.cwd(), "data/tiktok-shop-dashboard/current.json");
@@ -23,7 +24,7 @@ const compactSelector = () => {
     mode: "server_side_cumulative_creator_snapshots",
     granularity: "daily",
     status: snapshots.length ? "OK" : "DEGRADED",
-    range_rule: "Intervalos personalizados sao calculados no servidor por diferenca entre snapshots acumulados do Partner Center.",
+    range_rule: "GMV por dia e periodos personalizados usam ledger diario validado quando disponivel; snapshot acumulado fica como fallback mensal.",
     available_dates: snapshots.map((snapshot) => snapshot.endInclusive),
     snapshot_count: snapshots.length,
     snapshots_lazy: true,
@@ -98,7 +99,7 @@ const summarizeCreators = (creators) => {
 };
 
 const periodData = (data, from, to) => {
-  const aggregate = aggregateTikTokSnapshots({ from, to });
+  const aggregate = getRetencaoCanonicalPeriod({ from, to });
   const latestByHandle = new Map(
     (data.creator_list || data.top_creators || []).map((creator) => [
       String(creator.handle || creator.creator_name || "").replace(/^@/, "").toLowerCase(),
@@ -146,9 +147,10 @@ const periodData = (data, from, to) => {
     period_view: {
       requested: aggregate.requested,
       effective: { from: coverage.from, to: coverage.to },
-      exact: coverage.mode === "exact_or_contained",
+      exact: coverage.mode === "exact_or_contained" || coverage.mode === "daily_ledger_exact",
       warning: (aggregate.warnings || [])[0] || "",
       snapshots_used: (coverage.snapshots || []).length,
+      source_strategy: aggregate.source?.strategy || null,
     },
     data_quality: {
       adjustments: aggregate.adjustments || {},
