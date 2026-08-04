@@ -17,6 +17,15 @@ const monthLabel = (value) => value ? new Date(`${value}-15T12:00:00`).toLocaleD
 const originLabel = (acquisition) => acquisition?.key === "unknown" ? "Meta Ads + tracking perdido" : acquisition?.label
 const tierOrder = ["start", "silver", "gold", "diamond", "safira"]
 
+function currentSaoPauloMonth() {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+  }).formatToParts(new Date()).map(({ type, value }) => [type, value]))
+  return `${parts.year}-${parts.month}`
+}
+
 function Metric({ label, value, note, tone = "violet" }) {
   return <div className={`econ-metric ${tone}`}><span>{label}</span><strong>{value}</strong><small>{note}</small></div>
 }
@@ -125,15 +134,15 @@ function CreatorDetail({ creator }) {
 
 export default function CreatorEconomicsView() {
   const [from, setFrom] = useState("2026-01")
-  const [to, setTo] = useState("2026-07")
+  const [to, setTo] = useState(currentSaoPauloMonth)
   const [source, setSource] = useState("all")
   const [queryDraft, setQueryDraft] = useState("")
   const [query, setQuery] = useState("")
   const [sort, setSort] = useState("revenue")
   const [page, setPage] = useState(1)
   const [expanded, setExpanded] = useState("")
-  const [portfolioMonth, setPortfolioMonth] = useState("2026-07")
-  const [tierTransitionMonth, setTierTransitionMonth] = useState("2026-07")
+  const [portfolioMonth, setPortfolioMonth] = useState(currentSaoPauloMonth)
+  const [tierTransitionMonth, setTierTransitionMonth] = useState(currentSaoPauloMonth)
   const [movementWindow, setMovementWindow] = useState("30")
   const [exitChartView, setExitChartView] = useState("combined")
   const [dashboardSection, setDashboardSection] = useState("overview")

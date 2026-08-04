@@ -96,6 +96,15 @@ test("mobile header does not let sticky navigation cover dashboard content", () 
   assert.match(source, /@media\(max-width:560px\)\{\.econ-topbar\{background:#070910;backdrop-filter:none\}\.creator-dashboard-nav\{position:relative;top:auto;margin-left:0;margin-right:0/)
 })
 
+test("dashboard defaults month selectors to the current Sao Paulo month", () => {
+  assert.match(source, /function currentSaoPauloMonth\(\)/)
+  assert.match(source, /timeZone: "America\/Sao_Paulo"/)
+  assert.match(source, /const \[to, setTo\] = useState\(currentSaoPauloMonth\)/)
+  assert.match(source, /const \[portfolioMonth, setPortfolioMonth\] = useState\(currentSaoPauloMonth\)/)
+  assert.match(source, /const \[tierTransitionMonth, setTierTransitionMonth\] = useState\(currentSaoPauloMonth\)/)
+  assert.doesNotMatch(source, /useState\("2026-07"\)/)
+})
+
 test("exit chart uses small translucent blue points and a red line for prior 30-day GMV", () => {
   assert.match(source, /<Scatter yAxisId="people" zAxisId="exitDots" dataKey="exits" name="Desvinculados · pontos" fill="#54D8E8" fillOpacity={0\.72}/)
   assert.match(source, /dataKey="exitedGmvPrior30d" name="GMV previo 30d · linha" stroke="#FF647C"/)
