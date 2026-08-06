@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { proxyCreatorEconomics } from '../lib/creator-economics-upstream.mjs'
+import { isNetlifyRequest, proxyCreatorEconomics } from '../lib/creator-economics-upstream.mjs'
+
+test('detects Netlify from the public request hostname when runtime env is absent', () => {
+  assert.equal(isNetlifyRequest(new Request('https://amplifyhub123.netlify.app/api/creator-economics')), true)
+  assert.equal(isNetlifyRequest(new Request('https://main--amplifyhub123.netlify.app/api/creator-economics')), true)
+  assert.equal(isNetlifyRequest(new Request('https://amplify-hub.72.60.147.19.sslip.io/api/creator-economics')), false)
+})
 
 test('proxies the complete query to the VPS creator economics API', async () => {
   let requestedUrl = null

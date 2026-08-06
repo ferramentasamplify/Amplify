@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import q3CreatorPlan from '../../../data/creator-business-unit-plan-q3-2026.v1.json'
 import { buildCreatorCostInventory, buildExitedCreatorRows, buildMonthlyCreatorBusinessUnit, buildRetentionAnalytics, classifyCreatorCost, normalizeGastosRows } from '../../../lib/creator-business-unit.mjs'
-import { proxyCreatorEconomics } from '../../../lib/creator-economics-upstream.mjs'
+import { isNetlifyRequest, proxyCreatorEconomics } from '../../../lib/creator-economics-upstream.mjs'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -501,7 +501,7 @@ function reconcileEstimatedRevenue(items, target) {
 
 export async function GET(request) {
   try {
-    if (process.env.NETLIFY === 'true') return await proxyCreatorEconomics(request)
+    if (process.env.NETLIFY === 'true' || isNetlifyRequest(request)) return await proxyCreatorEconomics(request)
 
     const snapshot = JSON.parse(await readFile(LIVE_PATH, 'utf8'))
     const url = new URL(request.url)
