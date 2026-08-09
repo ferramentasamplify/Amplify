@@ -29,8 +29,8 @@ test('visual bruto remove acabamento cinematografico da nova secao', () => {
 test('o painel de status separa completo, em producao e nao iniciado', () => {
   assert.match(source, /className="new-brand-build-status"/)
   assert.match(source, /Tracking no Hub.*?complete/s)
-  assert.match(source, /Anúncios.*?in-progress/s)
-  assert.match(source, /Landing page.*?in-progress/s)
+  assert.match(source, /Anúncios.*?complete/s)
+  assert.match(source, /Landing page.*?complete/s)
   assert.match(source, /Checkout.*?in-progress/s)
   assert.match(source, /Curso.*?in-progress/s)
   assert.match(source, /Automações n8n.*?planned/s)
@@ -45,4 +45,13 @@ test('o funil tem regra mobile propria sem remover a leitura das etapas', () => 
   assert.match(source, /@media\(max-width:620px\).*?\.new-funnel-stage/s)
   assert.match(source, /--mobile-stage-width/)
   assert.match(source, /\.new-funnel-big-number/)
+})
+
+test('mostra campanha atribuida e sinais proprios da LP sem misturar fontes', () => {
+  assert.match(source, /Leitura do lancamento atual/)
+  assert.match(source, /Campanha atribuida/)
+  assert.match(source, /Sinais proprios da pagina/)
+  assert.match(source, /Meta Ads atribuido/)
+  assert.match(source, /WebinarLead/)
+  assert.match(source, /live-signal-scroll/)
 })

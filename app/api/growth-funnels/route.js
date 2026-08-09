@@ -3,6 +3,11 @@ import fallbackSnapshot from '@/data/growth-funnels-fallback.json'
 import { buildAudienceTree, buildMetaHierarchy } from '@/lib/growth-funnel-tree.mjs'
 import { buildNewBrandFunnel } from '@/lib/new-brand-funnel.mjs'
 import { aggregateTrackingEvents, loadTrackingEvents } from '@/lib/new-brand-funnel-events.mjs'
+import {
+  buildLpSignalMetrics,
+  buildWebinarCampaignMetrics,
+  extractPixelEventTotals,
+} from '@/lib/new-brand-funnel-live.mjs'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -12,6 +17,8 @@ const LIVE_PATH = '/var/lib/amplify-hub/growth-funnels-live.json'
 const NEW_BRAND_EVENTS_PATH = '/var/lib/amplify-hub/new-brand-funnel-events.jsonl'
 const META_ENV_PATH = '/root/.openclaw/workspaces/analista-trafego/.env'
 const META_API_VERSION = 'v19.0'
+const DEFAULT_WEBINAR_CAMPAIGN_NAME = 'LEADS | MARCAS | WEBINAR TIKTOK SHOP | AGO26'
+const WEBINAR_LAUNCH_AT = '2026-08-09T18:00:00.000Z'
 
 const SNIPER_STAGES = [
   { key: 'leads', label: 'Leads Sniper', rank: 0 },
@@ -210,7 +217,7 @@ async function readMetaRange(from, to) {
     if (!env.META_ACCESS_TOKEN || !env.META_AD_ACCOUNT_ID) throw new Error('credenciais Meta não configuradas')
     const params = new URLSearchParams({
       access_token: env.META_ACCESS_TOKEN,
-      fields: 'ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,spend,results',
+      fields: 'ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,spend,impressions,clicks,inline_link_clicks,actions,results',
       time_range: JSON.stringify({ since: from, until: to }),
       level: 'ad',
       limit: '500',
@@ -239,6 +246,7 @@ async function readMetaRange(from, to) {
     })).filter((ad) => ad.recent.spend > 0 || (ad.recent.results || 0) > 0)
     return {
       ads,
+      rows,
       source: 'Meta Ads ao vivo',
       reference: `${from} a ${to}`,
       generatedAt: new Date().toISOString(),
@@ -246,7 +254,42 @@ async function readMetaRange(from, to) {
       error: null,
     }
   } catch (error) {
-    return { ads: [], source: 'Meta Ads ao vivo', reference: `${from} a ${to}`, generatedAt: null, stale: true, error: error.message }
+    return { ads: [], rows: [], source: 'Meta Ads ao vivo', reference: `${from} a ${to}`, generatedAt: null, stale: true, error: error.message }
+  }
+}
+
+async function readPixelEventTotals(from, to) {
+  const pixelId = process.env.NEW_BRAND_FUNNEL_PIXEL_ID || ''
+  if (!pixelId) return { totals: {}, configured: false, stale: true, error: 'Pixel do webinar nao configurado no Hub' }
+  try {
+    const env = parseEnvFile(await readFile(META_ENV_PATH, 'utf8'))
+    if (!env.META_ACCESS_TOKEN) throw new Error('token Meta nao configurado')
+    const periodStart = Date.parse(`${from}T00:00:00.000-03:00`)
+    const launchStart = Date.parse(process.env.NEW_BRAND_FUNNEL_LAUNCH_AT || WEBINAR_LAUNCH_AT)
+    const startTime = Math.floor(Math.max(periodStart, launchStart) / 1000)
+    const endTime = Math.floor(Date.parse(`${to}T23:59:59.999-03:00`) / 1000)
+    if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || startTime > endTime) {
+      return { totals: {}, configured: true, stale: false, error: null, reference: `${from} a ${to}` }
+    }
+    const params = new URLSearchParams({
+      access_token: env.META_ACCESS_TOKEN,
+      aggregation: 'event_total_counts',
+      start_time: String(startTime),
+      end_time: String(endTime),
+      limit: '100',
+    })
+    const response = await fetch(`https://graph.facebook.com/${META_API_VERSION}/${pixelId}/stats?${params}`, { cache: 'no-store' })
+    if (!response.ok) throw new Error(`Meta Pixel respondeu ${response.status}`)
+    const payload = await response.json()
+    return {
+      totals: extractPixelEventTotals(payload),
+      configured: true,
+      stale: false,
+      error: null,
+      reference: `${new Date(startTime * 1000).toISOString()} ate ${to}`,
+    }
+  } catch (error) {
+    return { totals: {}, configured: true, stale: true, error: error.message, reference: `${from} a ${to}` }
   }
 }
 
@@ -262,7 +305,10 @@ export async function GET(request) {
     if (to > coverageTo) to = coverageTo
     if (from > to) [from, to] = [to, from]
 
-    const meta = await readMetaRange(from, to)
+    const [meta, pixelEvents] = await Promise.all([
+      readMetaRange(from, to),
+      readPixelEventTotals(from, to),
+    ])
     const creators = aggregate(snapshot, 'creators', from, to)
     const brands = aggregate(snapshot, 'brands', from, to)
     const metaReference = meta.generatedAt
@@ -289,8 +335,42 @@ export async function GET(request) {
       trackingReadError = error instanceof Error ? error.message : 'falha ao ler eventos'
     }
     const trackingAggregate = aggregateTrackingEvents(trackingRead.events, { from, to, connectedEventNames })
+    const webinarCampaign = buildWebinarCampaignMetrics(meta.rows, {
+      campaignName: process.env.NEW_BRAND_FUNNEL_META_CAMPAIGN_NAME || DEFAULT_WEBINAR_CAMPAIGN_NAME,
+      leadCustomConversionId: process.env.NEW_BRAND_FUNNEL_LEAD_CUSTOM_CONVERSION_ID || '',
+      reference: metaReference,
+    })
+    const lpSignals = {
+      ...buildLpSignalMetrics(pixelEvents.totals, {
+        fallbackLeadCount: webinarCampaign.values.leads,
+        reference: pixelEvents.reference,
+        webinarLeadTrackingSince: process.env.NEW_BRAND_FUNNEL_WEBINAR_LEAD_SINCE || null,
+      }),
+      available: pixelEvents.configured && !pixelEvents.stale,
+      stale: pixelEvents.stale,
+      error: pixelEvents.error,
+    }
+    const connectedValues = { ...trackingAggregate.values }
+    if (webinarCampaign.found && !meta.stale) {
+      connectedValues['creative-view'] = webinarCampaign.values.videoViews
+      connectedValues['landing-view'] = webinarCampaign.values.landingPageViews
+      connectedValues['diagnostic-form'] = webinarCampaign.values.leads
+    }
+    const builtNewBrandFunnel = buildNewBrandFunnel(connectedValues, { reference: `${from} a ${to}` })
+    const liveSourceLabels = {
+      'creative-view': 'Meta Ads · video_view',
+      'landing-view': 'Meta Ads · landing_page_view',
+      'diagnostic-form': 'Meta Ads · conversao especifica do webinar',
+    }
     const newBrandFunnel = {
-      ...buildNewBrandFunnel(trackingAggregate.values, { reference: `${from} a ${to}` }),
+      ...builtNewBrandFunnel,
+      stages: builtNewBrandFunnel.stages.map((stage) => stage.value == null || !liveSourceLabels[stage.key]
+        ? stage
+        : { ...stage, sourceLabel: liveSourceLabels[stage.key] }),
+      live: {
+        campaign: { ...webinarCampaign, available: webinarCampaign.found && !meta.stale, stale: meta.stale, error: meta.error },
+        lp: lpSignals,
+      },
       tracking: {
         endpoint: '/api/new-brand-funnel/events',
         receiverConfigured: Boolean(process.env.NEW_BRAND_FUNNEL_INGEST_TOKEN),
@@ -299,6 +379,7 @@ export async function GET(request) {
         duplicateEvents: trackingAggregate.duplicateEvents,
         invalidEvents: trackingAggregate.invalidEvents + trackingRead.invalidLines,
         readError: trackingReadError,
+        metaConnectedStages: builtNewBrandFunnel.stages.filter((stage) => stage.value != null).map((stage) => stage.key),
       },
     }
     return Response.json({
