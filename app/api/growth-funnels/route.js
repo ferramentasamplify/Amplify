@@ -19,6 +19,7 @@ const META_ENV_PATH = '/root/.openclaw/workspaces/analista-trafego/.env'
 const META_API_VERSION = 'v19.0'
 const DEFAULT_WEBINAR_CAMPAIGN_NAME = 'LEADS | MARCAS | WEBINAR TIKTOK SHOP | AGO26'
 const WEBINAR_LAUNCH_AT = '2026-08-09T18:00:00.000Z'
+const NOTION_API_VERSION = '2022-06-28'
 
 const SNIPER_STAGES = [
   { key: 'leads', label: 'Leads Sniper', rank: 0 },
@@ -293,6 +294,55 @@ async function readPixelEventTotals(from, to) {
   }
 }
 
+async function readNotionPurchaseIntentCount(from, to) {
+  const token = process.env.NOTION_FUNIL_MENTORIA_SECRET || ''
+  const databaseId = process.env.NOTION_FUNIL_MENTORIA_DATABASE_ID || ''
+  const reference = `${from} a ${to}`
+  if (!token || !databaseId) {
+    return { value: null, available: false, stale: true, error: 'Notion do Funil Mentoria nao configurado', reference }
+  }
+  try {
+    const nextDay = new Date(`${to}T12:00:00.000Z`)
+    nextDay.setUTCDate(nextDay.getUTCDate() + 1)
+    const before = nextDay.toISOString().slice(0, 10)
+    let total = 0
+    let cursor = null
+    for (let page = 0; page < 20; page += 1) {
+      const body = {
+        page_size: 100,
+        filter: {
+          and: [
+            { property: 'Etapa do funil', select: { equals: 'Clicou em comprar' } },
+            { property: 'Criado em', created_time: { on_or_after: `${from}T00:00:00-03:00` } },
+            { property: 'Criado em', created_time: { before: `${before}T00:00:00-03:00` } },
+          ],
+        },
+      }
+      if (cursor) body.start_cursor = cursor
+      const response = await fetch(`https://api.notion.com/v1/databases/${databaseId}/query`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Notion-Version': NOTION_API_VERSION,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+        cache: 'no-store',
+        signal: AbortSignal.timeout(15000),
+      })
+      if (!response.ok) throw new Error(`Notion respondeu ${response.status}`)
+      const payload = await response.json()
+      total += Array.isArray(payload.results) ? payload.results.length : 0
+      if (!payload.has_more) break
+      cursor = payload.next_cursor
+      if (!cursor) break
+    }
+    return { value: total, available: true, stale: false, error: null, reference, stage: 'Clicou em comprar' }
+  } catch (error) {
+    return { value: null, available: false, stale: true, error: error.message, reference }
+  }
+}
+
 export async function GET(request) {
   try {
     const { snapshot, source, liveError } = await readSnapshot()
@@ -305,9 +355,10 @@ export async function GET(request) {
     if (to > coverageTo) to = coverageTo
     if (from > to) [from, to] = [to, from]
 
-    const [meta, pixelEvents] = await Promise.all([
+    const [meta, pixelEvents, notionPurchaseIntent] = await Promise.all([
       readMetaRange(from, to),
       readPixelEventTotals(from, to),
+      readNotionPurchaseIntentCount(from, to),
     ])
     const creators = aggregate(snapshot, 'creators', from, to)
     const brands = aggregate(snapshot, 'brands', from, to)
@@ -356,15 +407,15 @@ export async function GET(request) {
       connectedValues['landing-view'] = webinarCampaign.values.landingPageViews
       connectedValues['diagnostic-form'] = webinarCampaign.values.leads
     }
-    if (lpSignals.available) {
-      connectedValues['purchase-intent'] = lpSignals.values.purchaseIntents
+    if (notionPurchaseIntent.available) {
+      connectedValues['purchase-intent'] = notionPurchaseIntent.value
     }
     const builtNewBrandFunnel = buildNewBrandFunnel(connectedValues, { reference: `${from} a ${to}` })
     const liveSourceLabels = {
       'creative-view': 'Meta Ads · video_view',
       'landing-view': 'Meta Ads · landing_page_view',
       'diagnostic-form': 'Meta Ads · conversao especifica do webinar',
-      'purchase-intent': 'Pixel da LP · WebinarPurchaseIntent',
+      'purchase-intent': 'Notion · Funil Mentoria · Clicou em comprar',
     }
     const newBrandFunnel = {
       ...builtNewBrandFunnel,
@@ -374,6 +425,7 @@ export async function GET(request) {
       live: {
         campaign: { ...webinarCampaign, available: webinarCampaign.found && !meta.stale, stale: meta.stale, error: meta.error },
         lp: lpSignals,
+        notionPurchaseIntent,
       },
       tracking: {
         endpoint: '/api/new-brand-funnel/events',
