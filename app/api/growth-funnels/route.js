@@ -356,11 +356,15 @@ export async function GET(request) {
       connectedValues['landing-view'] = webinarCampaign.values.landingPageViews
       connectedValues['diagnostic-form'] = webinarCampaign.values.leads
     }
+    if (lpSignals.available) {
+      connectedValues['purchase-intent'] = lpSignals.values.purchaseIntents
+    }
     const builtNewBrandFunnel = buildNewBrandFunnel(connectedValues, { reference: `${from} a ${to}` })
     const liveSourceLabels = {
       'creative-view': 'Meta Ads · video_view',
       'landing-view': 'Meta Ads · landing_page_view',
       'diagnostic-form': 'Meta Ads · conversao especifica do webinar',
+      'purchase-intent': 'Pixel da LP · WebinarPurchaseIntent',
     }
     const newBrandFunnel = {
       ...builtNewBrandFunnel,
