@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { aggregateLpVariants } from '../lib/lp-variant-metrics.mjs'
+import { aggregateLpVariants, mergeLpVariantVisits } from '../lib/lp-variant-metrics.mjs'
 
 const page = ({ variant = '', stage = 'Preencheu LP', origin = 'Landing page' } = {}) => ({
   properties: {
@@ -32,4 +32,26 @@ test('does not invent a variant when the field is blank or unknown', () => {
   const result = aggregateLpVariants([page(), page({ variant: 'Other' })])
   assert.equal(result.unidentified, 2)
   assert.equal(result.rows.reduce((sum, row) => sum + row.leads, 0), 0)
+})
+
+test('merges identified LP sessions and never reports fewer entries than proven leads', () => {
+  const variants = aggregateLpVariants([
+    page({ variant: 'LP antiga' }),
+    page({ variant: 'LP antiga' }),
+    page({ variant: 'Headline A' }),
+  ])
+  const merged = mergeLpVariantVisits(variants, {
+    available: true,
+    metric: 'unique_sessions',
+    rows: [
+      { key: 'old', visits: 0 },
+      { key: 'a', visits: 0 },
+      { key: 'b', visits: 3 },
+    ],
+  })
+  assert.deepEqual(merged.rows.map(({ key, visits, visitSource }) => ({ key, visits, visitSource })), [
+    { key: 'old', visits: 2, visitSource: 'lead_floor' },
+    { key: 'a', visits: 1, visitSource: 'lead_floor' },
+    { key: 'b', visits: 3, visitSource: 'lp_view' },
+  ])
 })

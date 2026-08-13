@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import fallbackSnapshot from '@/data/growth-funnels-fallback.json'
 import { buildAudienceTree, buildMetaHierarchy } from '@/lib/growth-funnel-tree.mjs'
 import { buildNewBrandFunnel } from '@/lib/new-brand-funnel.mjs'
-import { aggregateLpVariants } from '@/lib/lp-variant-metrics.mjs'
+import { aggregateLpVariants, mergeLpVariantVisits } from '@/lib/lp-variant-metrics.mjs'
 import { aggregateTrackingEvents, loadTrackingEvents } from '@/lib/new-brand-funnel-events.mjs'
 import {
   buildLpSignalMetrics,
@@ -393,6 +393,23 @@ async function readNotionVariantMetrics(from, to) {
   }
 }
 
+async function readLpVariantVisits(from, to) {
+  const reference = `${from} a ${to}`
+  const endpoint = process.env.NEW_BRAND_FUNNEL_LP_VIEWS_ENDPOINT
+    || 'https://n8n.amplifyugc.co/webhook/metodoChinesTracking20260813/webhook%2520-%2520visitas%2520por%2520lp/webinar-tiktok-shop-lp-views'
+  try {
+    const url = new URL(endpoint)
+    url.searchParams.set('from', from)
+    url.searchParams.set('to', to)
+    const response = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(10000) })
+    if (!response.ok) throw new Error(`n8n respondeu ${response.status}`)
+    const payload = await response.json()
+    return { ...payload, available: payload?.available === true, stale: false, error: null, reference }
+  } catch (error) {
+    return { rows: [], metric: null, available: false, stale: true, error: error.message, reference }
+  }
+}
+
 export async function GET(request) {
   try {
     if (process.env.NETLIFY === 'true' || isNetlifyGrowthFunnelsRequest(request)) return await proxyGrowthFunnels(request)
@@ -407,12 +424,16 @@ export async function GET(request) {
     if (to > coverageTo) to = coverageTo
     if (from > to) [from, to] = [to, from]
 
-    const [meta, pixelEvents, notionPurchaseIntent, notionVariants] = await Promise.all([
+    const [meta, pixelEvents, notionPurchaseIntent, notionVariants, lpVariantVisits] = await Promise.all([
       readMetaRange(from, to),
       readPixelEventTotals(from, to),
       readNotionPurchaseIntentCount(from, to),
       readNotionVariantMetrics(from, to),
+      readLpVariantVisits(from, to),
     ])
+    const variantsWithVisits = notionVariants.available
+      ? { ...mergeLpVariantVisits(notionVariants, lpVariantVisits), visitMetrics: lpVariantVisits }
+      : notionVariants
     const creators = aggregate(snapshot, 'creators', from, to)
     const brands = aggregate(snapshot, 'brands', from, to)
     const metaReference = meta.generatedAt
@@ -479,7 +500,7 @@ export async function GET(request) {
         campaign: { ...webinarCampaign, available: webinarCampaign.found && !meta.stale, stale: meta.stale, error: meta.error },
         lp: lpSignals,
         notionPurchaseIntent,
-        variants: notionVariants,
+        variants: variantsWithVisits,
       },
       tracking: {
         endpoint: '/api/new-brand-funnel/events',

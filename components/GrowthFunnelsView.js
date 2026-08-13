@@ -321,7 +321,7 @@ function NewBrandFunnelPanel({ funnel }) {
       </section>
 
       {selectedVariant && <div className="variant-filter-notice" role="status">
-        <div><strong>Funil filtrado por {selectedVariant.label}</strong><span>Tracking geral compartilhado permanece visivel nas etapas sem quebra por headline. Leads e intencoes estao filtrados.</span></div>
+        <div><strong>Funil filtrado por {selectedVariant.label}</strong><span>Criativo fica indisponivel sem quebra por headline. Entrada na LP, leads e intencoes usam somente dados identificados da variante.</span></div>
         <button type="button" onClick={() => setSelectedVariantKey(null)}>Remover filtro</button>
       </div>}
 
