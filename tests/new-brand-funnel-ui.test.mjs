@@ -55,3 +55,13 @@ test('mostra campanha atribuida e sinais proprios da LP sem misturar fontes', ()
   assert.match(source, /WebinarLead/)
   assert.match(source, /live-signal-scroll/)
 })
+
+test('compara LP antiga e headlines sem substituir a origem de aquisicao', () => {
+  assert.match(source, /LP antiga x Headline A x Headline B/)
+  assert.match(source, /Origem continua sendo o canal; a variante fica separada/)
+  assert.match(source, /Via Meta paga/)
+  assert.match(source, /Intenções de compra/)
+  assert.match(source, /Lead → intenção/)
+  assert.match(source, /13\/08\/2026 às 15:46 BRT/)
+  assert.match(source, /sem variante identificada/)
+})

@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises'
 import fallbackSnapshot from '@/data/growth-funnels-fallback.json'
 import { buildAudienceTree, buildMetaHierarchy } from '@/lib/growth-funnel-tree.mjs'
 import { buildNewBrandFunnel } from '@/lib/new-brand-funnel.mjs'
+import { aggregateLpVariants } from '@/lib/lp-variant-metrics.mjs'
 import { aggregateTrackingEvents, loadTrackingEvents } from '@/lib/new-brand-funnel-events.mjs'
 import {
   buildLpSignalMetrics,
@@ -344,6 +345,54 @@ async function readNotionPurchaseIntentCount(from, to) {
   }
 }
 
+async function readNotionVariantMetrics(from, to) {
+  const token = process.env.NOTION_FUNIL_MENTORIA_SECRET || ''
+  const databaseId = process.env.NOTION_FUNIL_MENTORIA_DATABASE_ID || ''
+  const reference = `${from} a ${to}`
+  if (!token || !databaseId) {
+    return { rows: [], totalLeads: null, totalPurchaseIntents: null, unidentified: null, available: false, stale: true, error: 'Notion do Funil Mentoria nao configurado', reference }
+  }
+  try {
+    const nextDay = new Date(`${to}T12:00:00.000Z`)
+    nextDay.setUTCDate(nextDay.getUTCDate() + 1)
+    const before = nextDay.toISOString().slice(0, 10)
+    const pages = []
+    let cursor = null
+    for (let page = 0; page < 20; page += 1) {
+      const body = {
+        page_size: 100,
+        filter: {
+          and: [
+            { property: 'Criado em', created_time: { on_or_after: `${from}T00:00:00-03:00` } },
+            { property: 'Criado em', created_time: { before: `${before}T00:00:00-03:00` } },
+          ],
+        },
+      }
+      if (cursor) body.start_cursor = cursor
+      const response = await fetch(`https://api.notion.com/v1/databases/${databaseId}/query`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Notion-Version': NOTION_API_VERSION,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+        cache: 'no-store',
+        signal: AbortSignal.timeout(15000),
+      })
+      if (!response.ok) throw new Error(`Notion respondeu ${response.status}`)
+      const payload = await response.json()
+      pages.push(...(Array.isArray(payload.results) ? payload.results : []))
+      if (!payload.has_more) break
+      cursor = payload.next_cursor
+      if (!cursor) break
+    }
+    return { ...aggregateLpVariants(pages), available: true, stale: false, error: null, reference }
+  } catch (error) {
+    return { rows: [], totalLeads: null, totalPurchaseIntents: null, unidentified: null, available: false, stale: true, error: error.message, reference }
+  }
+}
+
 export async function GET(request) {
   try {
     if (process.env.NETLIFY === 'true' || isNetlifyGrowthFunnelsRequest(request)) return await proxyGrowthFunnels(request)
@@ -358,10 +407,11 @@ export async function GET(request) {
     if (to > coverageTo) to = coverageTo
     if (from > to) [from, to] = [to, from]
 
-    const [meta, pixelEvents, notionPurchaseIntent] = await Promise.all([
+    const [meta, pixelEvents, notionPurchaseIntent, notionVariants] = await Promise.all([
       readMetaRange(from, to),
       readPixelEventTotals(from, to),
       readNotionPurchaseIntentCount(from, to),
+      readNotionVariantMetrics(from, to),
     ])
     const creators = aggregate(snapshot, 'creators', from, to)
     const brands = aggregate(snapshot, 'brands', from, to)
@@ -429,6 +479,7 @@ export async function GET(request) {
         campaign: { ...webinarCampaign, available: webinarCampaign.found && !meta.stale, stale: meta.stale, error: meta.error },
         lp: lpSignals,
         notionPurchaseIntent,
+        variants: notionVariants,
       },
       tracking: {
         endpoint: '/api/new-brand-funnel/events',
