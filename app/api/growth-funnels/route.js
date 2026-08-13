@@ -8,6 +8,7 @@ import {
   buildWebinarCampaignMetrics,
   extractPixelEventTotals,
 } from '@/lib/new-brand-funnel-live.mjs'
+import { isNetlifyGrowthFunnelsRequest, proxyGrowthFunnels } from '@/lib/growth-funnels-upstream.mjs'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -345,6 +346,8 @@ async function readNotionPurchaseIntentCount(from, to) {
 
 export async function GET(request) {
   try {
+    if (process.env.NETLIFY === 'true' || isNetlifyGrowthFunnelsRequest(request)) return await proxyGrowthFunnels(request)
+
     const { snapshot, source, liveError } = await readSnapshot()
     const url = new URL(request.url)
     const coverageFrom = snapshot.coverage?.from || '2026-07-01'
