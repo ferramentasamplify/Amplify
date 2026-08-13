@@ -14,6 +14,8 @@ test('variant cards are single-select buttons with an explicit consolidated opti
 test('selected variant filters the lower funnel and clearly labels its scope', () => {
   assert.match(source, /filterNewBrandStagesByVariant/)
   assert.match(source, /Funil filtrado por/)
-  assert.match(source, /Somente etapas identificadas por variante/)
+  assert.match(source, /Tracking geral compartilhado/)
+  assert.match(source, /metricScope === "shared"/)
+  assert.match(source, /data-metric-scope=\{stage\.metricScope \|\| "consolidated"\}/)
   assert.match(source, /data-variant-filter=\{selectedVariant\?\.key \|\| "all"\}/)
 })
