@@ -54,7 +54,16 @@ const normalizeSearch = (value) => String(value || "")
   .replace(/[\u0300-\u036f]/g, "")
   .replace(/^@/, "")
   .trim();
-const SUPER_AFILIADO_UTMS = new Set(["giselecorreia"]);
+const SUPER_AFILIADO_UTMS = new Set([
+  "giselecorreia",
+  "jota_",
+  "andreeleia_",
+  "glow.fit1",
+  "alex_",
+  "marinaportelach",
+  "alwaysfit",
+  "laizmacaneiro",
+]);
 const isSuperAfiliadoUtm = (utm) => SUPER_AFILIADO_UTMS.has(normalizeSearch(utm));
 const todayISO = () => {
   const now = new Date();

@@ -14,10 +14,33 @@ const BR_DATE_FORMATTER = new Intl.DateTimeFormat('en-CA', {
   month: '2-digit',
   day: '2-digit',
 })
+const SUPER_AFILIADO_UTMS = new Set([
+  'giselecorreia',
+  'jota_',
+  'andreeleia_',
+  'glow.fit1',
+  'alex_',
+  'marinaportelach',
+  'alwaysfit',
+  'laizmacaneiro',
+])
 
 function parseBRL(v) {
   if (!v) return 0
   return parseFloat(String(v).replace('R$','').replace(/\s/g,'').replace(/\./g,'').replace(',','.').trim()) || 0
+}
+
+function normalizeUtm(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/^@+/, '')
+    .trim()
+}
+
+function isSuperAfiliadoUtm(value) {
+  return SUPER_AFILIADO_UTMS.has(normalizeUtm(value))
 }
 
 function readPhase(prop) {
@@ -119,7 +142,7 @@ async function fetchAllLeads() {
       createdDate: toDateKey(created),
       utm: p['UTM_Source']?.rich_text?.[0]?.plain_text ?? '',
     }
-  })
+  }).filter((lead) => !isSuperAfiliadoUtm(lead.utm))
 }
 
 async function fetchXlsxSummary() {

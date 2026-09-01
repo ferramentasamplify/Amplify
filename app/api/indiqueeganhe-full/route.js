@@ -14,6 +14,16 @@ const BR_DATE_FORMATTER = new Intl.DateTimeFormat('en-CA', {
   month: '2-digit',
   day: '2-digit',
 })
+const SUPER_AFILIADO_UTMS = new Set([
+  'giselecorreia',
+  'jota_',
+  'andreeleia_',
+  'glow.fit1',
+  'alex_',
+  'marinaportelach',
+  'alwaysfit',
+  'laizmacaneiro',
+])
 
 function parseBRL(v) {
   if (!v) return 0
@@ -25,6 +35,19 @@ function cleanHandle(h) {
   const m = h.match(/tiktok\.com\/@([^/?&\s]+)/)
   if (m) return m[1]
   return h.replace('@','').split('?')[0].split('&')[0].trim()
+}
+
+function normalizeUtm(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/^@+/, '')
+    .trim()
+}
+
+function isSuperAfiliadoUtm(value) {
+  return SUPER_AFILIADO_UTMS.has(normalizeUtm(value))
 }
 
 function formatTikTokHandle(value) {
@@ -172,7 +195,7 @@ async function fetchAllLeads({ startDate = '', endDate = '' } = {}) {
     }
   }).filter((lead) => {
     const date = lead.createdDate || lead.created?.slice(0, 10)
-    return date && (!startDate || date >= startDate) && (!endDate || date <= endDate)
+    return date && !isSuperAfiliadoUtm(lead.utm) && (!startDate || date >= startDate) && (!endDate || date <= endDate)
   })
 }
 
