@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { readFile } from 'fs/promises'
+import { readFile, writeFile } from 'fs/promises'
 import * as XLSX from 'xlsx'
 import { queryNotionDatabase } from '@/lib/notion-query'
 
@@ -8,6 +8,12 @@ export const dynamic = 'force-dynamic'
 const INDIQUE_DB = '31ab0bbef15380a1ab97caa5c68e9813'
 const FOLDER_ID  = process.env.GDRIVE_FOLDER_ID || '1VeOK2-DTfnDbbRueHpKK-a5QkQtyP_Nj'
 const GDRIVE_KEY = process.env.GDRIVE_API_KEY || ''
+const BR_DATE_FORMATTER = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'America/Sao_Paulo',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+})
 
 function parseBRL(v) {
   if (!v) return 0
@@ -59,6 +65,18 @@ function isAgenciadoStatus(status) {
   return normalized === 'agenciado' || normalized === 'convite aceito'
 }
 
+function toDateKey(value) {
+  const raw = String(value || '')
+  if (!raw) return ''
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw
+  const date = new Date(raw)
+  return Number.isNaN(date.getTime()) ? raw.slice(0, 10) : BR_DATE_FORMATTER.format(date)
+}
+
+function readReferenceDate(prop, fallback) {
+  return prop?.date?.start || prop?.created_time || fallback || ''
+}
+
 function commissionForGmvRange(range) {
   const normalized = String(range || '')
     .toLowerCase()
@@ -89,6 +107,7 @@ async function fetchAllLeads() {
       p['Faixa de GMV (Faturamento Mensal no TikTok Shop)']
       || p['Faixa de GMV (Faturamento Mensal no Tiktok Shop)']
     )
+    const created = readReferenceDate(p['Data'], page.created_time)
     return {
       id: page.id,
       nome: p['Nome Completo']?.title?.[0]?.plain_text ?? '',
@@ -96,7 +115,8 @@ async function fetchAllLeads() {
       status,
       gmvRange,
       generatedCommission: commissionForGmvRange(gmvRange),
-      created: page.created_time,
+      created,
+      createdDate: toDateKey(created),
       utm: p['UTM_Source']?.rich_text?.[0]?.plain_text ?? '',
     }
   })
@@ -152,8 +172,34 @@ async function fetchXlsxSummary() {
 }
 
 let cache = null, cacheAt = 0
-const CACHE_TTL = 5 * 60 * 1000
+const CACHE_TTL = 4 * 60 * 60 * 1000
+const CACHE_FILE = '/tmp/amplify-hub-indiqueeganhe-summary-cache.json'
 const SNAPSHOT_FILE = `${process.cwd()}/data/indiqueeganhe-full-snapshot.json`
+const CACHE_HEADERS = {
+  'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+  'CDN-Cache-Control': 'no-store',
+  'Netlify-CDN-Cache-Control': 'no-store',
+  'Pragma': 'no-cache',
+  'Expires': '0',
+}
+
+function json(data, init = {}) {
+  return NextResponse.json(data, {
+    ...init,
+    headers: {
+      ...CACHE_HEADERS,
+      ...(init.headers || {}),
+    },
+  })
+}
+
+async function readCacheFile(cacheKey) {
+  try {
+    const saved = JSON.parse(await readFile(CACHE_FILE, 'utf8'))
+    if (saved?.cacheAt && saved?.data && saved?.cacheKey === cacheKey && Date.now() - saved.cacheAt < CACHE_TTL) return saved
+  } catch {}
+  return null
+}
 
 async function readBundledSnapshot() {
   try {
@@ -163,44 +209,72 @@ async function readBundledSnapshot() {
   return null
 }
 
+async function writeCacheFile(cacheKey, data) {
+  try {
+    await writeFile(CACHE_FILE, JSON.stringify({ cacheAt: Date.now(), cacheKey, data }), 'utf8')
+  } catch {}
+}
+
 export async function GET(req) {
   try {
-    const forceLive = req.nextUrl.searchParams.get('live') === '1'
-    if (!forceLive) {
+    const forceSnapshot = req.nextUrl.searchParams.get('snapshot') === '1'
+    const includeSales = req.nextUrl.searchParams.get('includeSales') === '1'
+    const cacheKey = JSON.stringify({ includeSales })
+
+    if (forceSnapshot) {
       const snapshot = await readBundledSnapshot()
       if (snapshot?.summary) {
-        return NextResponse.json({ ...snapshot.summary, source: 'bundled-snapshot' })
+        return json({ ...snapshot.summary, source: 'bundled-snapshot' })
       }
     }
 
-    if (cache && Date.now() - cacheAt < CACHE_TTL) return NextResponse.json(cache)
-
-    const [leads, { totalGmv, totalCom }] = await Promise.all([fetchAllLeads(), fetchXlsxSummary()])
-    const totalAgenciados = leads.filter(l => isAgenciadoStatus(l.status)).length
-    const conversionRate = leads.length ? Math.round(totalAgenciados / leads.length * 100) : 0
-    const totalGeneratedCommission = leads.reduce((sum, lead) => {
-      return isAgenciadoStatus(lead.status) ? sum + lead.generatedCommission : sum
-    }, 0)
-    const byStatus = leads.reduce((acc, lead) => {
-      const status = lead.status || 'Sem status'
-      acc[status] = (acc[status] ?? 0) + 1
-      return acc
-    }, {})
-
-    const result = {
-      total: leads.length,
-      totalAgenciados,
-      conversionRate,
-      totalGeneratedCommission,
-      byStatus,
-      totalGmv,
-      totalCom,
-      indiqueEarn: totalCom * 0.10 * 0.20,
-      updatedAt: new Date().toISOString(),
+    if (cache && Date.now() - cacheAt < CACHE_TTL) return json({ ...cache, source: 'live-cache' })
+    const saved = await readCacheFile(cacheKey)
+    if (saved) {
+      cache = saved.data
+      cacheAt = saved.cacheAt
+      return json({ ...saved.data, source: 'live-cache' })
     }
-    cache = result
-    cacheAt = Date.now()
-    return NextResponse.json(result)
+
+    try {
+      const [leads, sales] = await Promise.all([
+        fetchAllLeads(),
+        includeSales ? fetchXlsxSummary() : Promise.resolve({ totalGmv: 0, totalCom: 0 }),
+      ])
+      const { totalGmv, totalCom } = sales
+      const totalAgenciados = leads.filter(l => isAgenciadoStatus(l.status)).length
+      const conversionRate = leads.length ? Math.round(totalAgenciados / leads.length * 100) : 0
+      const totalGeneratedCommission = leads.reduce((sum, lead) => {
+        return isAgenciadoStatus(lead.status) ? sum + lead.generatedCommission : sum
+      }, 0)
+      const byStatus = leads.reduce((acc, lead) => {
+        const status = lead.status || 'Sem status'
+        acc[status] = (acc[status] ?? 0) + 1
+        return acc
+      }, {})
+
+      const result = {
+        total: leads.length,
+        totalAgenciados,
+        conversionRate,
+        totalGeneratedCommission,
+        byStatus,
+        totalGmv,
+        totalCom,
+        indiqueEarn: totalCom * 0.10 * 0.20,
+        updatedAt: new Date().toISOString(),
+      }
+      cache = result
+      cacheAt = Date.now()
+      await writeCacheFile(cacheKey, result)
+      return json({ ...result, source: 'live-notion' })
+    } catch (liveError) {
+      const snapshot = await readBundledSnapshot()
+      if (snapshot?.summary) {
+        return json({ ...snapshot.summary, source: 'snapshot-fallback', liveError: liveError.message })
+      }
+      throw liveError
+    }
   } catch (e) {
     return NextResponse.json({ error: e.message }, { status: 500 })
   }

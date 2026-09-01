@@ -18,8 +18,20 @@ const STATUS_COLOR = {
 
 const fmtBRL = (n) => "R$" + Number(n || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtDecimal = (n) => Number(n || 0).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-const fmtDate = (iso) => new Date(iso).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
-const fmtWeek = (iso) => { const d = new Date(iso); return `${d.getDate()}/${d.getMonth() + 1}`; };
+const dateParts = (iso) => {
+  const [year, month, day] = String(iso || "").slice(0, 10).split("-").map(Number);
+  return year && month && day ? { year, month, day } : null;
+};
+const fmtDate = (iso) => {
+  const parts = dateParts(iso);
+  if (!parts) return "-";
+  return new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "short", timeZone: "UTC" })
+    .format(new Date(Date.UTC(parts.year, parts.month - 1, parts.day)));
+};
+const fmtWeek = (iso) => {
+  const parts = dateParts(iso);
+  return parts ? `${parts.day}/${parts.month}` : "-";
+};
 const fmtTableDate = (value) => {
   const date = String(value || "").slice(0, 10);
   const [year, month, day] = date.split("-");
@@ -44,6 +56,14 @@ const normalizeSearch = (value) => String(value || "")
   .trim();
 const SUPER_AFILIADO_UTMS = new Set(["giselecorreia"]);
 const isSuperAfiliadoUtm = (utm) => SUPER_AFILIADO_UTMS.has(normalizeSearch(utm));
+const todayISO = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+};
+const monthStartISO = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+};
 const tableColumns = [
   { key: "date", label: "Data" },
   { key: "handle", label: "@ TikTok" },
@@ -61,15 +81,17 @@ const utmCommissionColumns = [
 export default function IndiqueEGanheView() {
   const pathname = usePathname();
   const router = useRouter();
+  const defaultStartDate = monthStartISO();
+  const defaultEndDate = todayISO();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedCreator, setSelectedCreator] = useState(null);
   const [creatorFilter, setCreatorFilter] = useState("");
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
-  const [applied, setApplied] = useState({ start: "", end: "" });
+  const [startDate, setStartDate] = useState(defaultStartDate);
+  const [endDate, setEndDate] = useState(defaultEndDate);
+  const [applied, setApplied] = useState({ start: defaultStartDate, end: defaultEndDate });
   const [activeChart, setActiveChart] = useState("indiqueEarn");
   const [tableMode, setTableMode] = useState("leads");
   const [sortConfig, setSortConfig] = useState({ key: "date", direction: "desc" });

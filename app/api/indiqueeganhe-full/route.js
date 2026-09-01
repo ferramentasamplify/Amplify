@@ -87,8 +87,16 @@ function readPhase(prop) {
   return ''
 }
 
-function readCreatedTime(prop, fallback) {
-  return prop?.created_time || fallback
+function toDateKey(value) {
+  const raw = String(value || '')
+  if (!raw) return ''
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw
+  const date = new Date(raw)
+  return Number.isNaN(date.getTime()) ? raw.slice(0, 10) : BR_DATE_FORMATTER.format(date)
+}
+
+function readReferenceDate(prop, fallback) {
+  return prop?.date?.start || prop?.created_time || fallback || ''
 }
 
 function commissionForGmvRange(range) {
@@ -105,12 +113,40 @@ function commissionForGmvRange(range) {
   return 15
 }
 
-async function fetchAllLeads() {
+function nextDate(date) {
+  const [year, month, day] = String(date || '').split('-').map(Number)
+  if (!year || !month || !day) return ''
+  const next = new Date(Date.UTC(year, month - 1, day + 1))
+  return next.toISOString().slice(0, 10)
+}
+
+function buildReferenceDateFilter(startDate, endDate) {
+  const date = {}
+  if (startDate) date.on_or_after = startDate
+  if (endDate) date.on_or_before = endDate
+  return Object.keys(date).length
+    ? { property: 'Data', date }
+    : undefined
+}
+
+async function fetchAllLeads({ startDate = '', endDate = '' } = {}) {
   const results = []
   let cursor
+  const filter = buildReferenceDateFilter(startDate, endDate)
+  const sorts = startDate
+    ? [{ property: 'Data', direction: 'descending' }]
+    : undefined
   do {
-    const res = await queryNotionDatabase(INDIQUE_DB, { start_cursor: cursor, page_size: 100 })
-    results.push(...res.results)
+    const res = await queryNotionDatabase(INDIQUE_DB, { start_cursor: cursor, page_size: 100, filter, sorts })
+    const pageResults = res.results || []
+    results.push(...pageResults)
+    if (startDate && pageResults.length) {
+      const oldestDate = pageResults
+        .map((page) => toDateKey(readReferenceDate(page.properties?.Data, page.created_time)))
+        .filter(Boolean)
+        .sort()[0]
+      if (oldestDate && oldestDate < startDate) break
+    }
     cursor = res.has_more ? (res.next_cursor ?? undefined) : undefined
   } while (cursor)
 
@@ -121,7 +157,8 @@ async function fetchAllLeads() {
       p['Faixa de GMV (Faturamento Mensal no TikTok Shop)']
       || p['Faixa de GMV (Faturamento Mensal no Tiktok Shop)']
     )
-    const created = readCreatedTime(p['Data'], page.created_time)
+    const created = readReferenceDate(p['Data'], page.created_time)
+    const createdDate = toDateKey(created)
     return {
       id: page.id,
       nome: p['Nome Completo']?.title?.[0]?.plain_text ?? '',
@@ -131,8 +168,11 @@ async function fetchAllLeads() {
       gmvRange,
       generatedCommission: commissionForGmvRange(gmvRange),
       created,
-      createdDate: BR_DATE_FORMATTER.format(new Date(created)),
+      createdDate,
     }
+  }).filter((lead) => {
+    const date = lead.createdDate || lead.created?.slice(0, 10)
+    return date && (!startDate || date >= startDate) && (!endDate || date <= endDate)
   })
 }
 
@@ -194,11 +234,28 @@ let cache = null, cacheAt = 0
 const CACHE_TTL = 4 * 60 * 60 * 1000
 const CACHE_FILE = '/tmp/amplify-hub-indiqueeganhe-full-cache.json'
 const SNAPSHOT_FILE = `${process.cwd()}/data/indiqueeganhe-full-snapshot.json`
+const CACHE_HEADERS = {
+  'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+  'CDN-Cache-Control': 'no-store',
+  'Netlify-CDN-Cache-Control': 'no-store',
+  'Pragma': 'no-cache',
+  'Expires': '0',
+}
 
-async function readCacheFile() {
+function json(data, init = {}) {
+  return NextResponse.json(data, {
+    ...init,
+    headers: {
+      ...CACHE_HEADERS,
+      ...(init.headers || {}),
+    },
+  })
+}
+
+async function readCacheFile(cacheKey) {
   try {
     const saved = JSON.parse(await readFile(CACHE_FILE, 'utf8'))
-    if (saved?.cacheAt && saved?.data && Date.now() - saved.cacheAt < CACHE_TTL) return saved
+    if (saved?.cacheAt && saved?.data && saved?.cacheKey === cacheKey && Date.now() - saved.cacheAt < CACHE_TTL) return saved
   } catch {}
   return null
 }
@@ -211,9 +268,9 @@ async function readBundledSnapshot() {
   return null
 }
 
-async function writeCacheFile(data) {
+async function writeCacheFile(cacheKey, data) {
   try {
-    await writeFile(CACHE_FILE, JSON.stringify({ cacheAt: Date.now(), data }), 'utf8')
+    await writeFile(CACHE_FILE, JSON.stringify({ cacheAt: Date.now(), cacheKey, data }), 'utf8')
   } catch {}
 }
 
@@ -280,104 +337,115 @@ export async function GET(req) {
     const startDate = req.nextUrl.searchParams.get('startDate') ?? ''
     const endDate = req.nextUrl.searchParams.get('endDate') ?? new Date().toISOString().slice(0, 10)
     const hasDateFilter = Boolean(startDate || req.nextUrl.searchParams.get('endDate'))
-    const forceLive = req.nextUrl.searchParams.get('live') === '1'
+    const forceSnapshot = req.nextUrl.searchParams.get('snapshot') === '1'
+    const includeSales = req.nextUrl.searchParams.get('includeSales') === '1'
+    const cacheKey = JSON.stringify({ startDate, endDate, hasDateFilter, includeSales })
 
-    if (!forceLive) {
+    if (forceSnapshot) {
       const snapshot = await readBundledSnapshot()
       if (snapshot) {
         const data = hasDateFilter ? filterCachedData(snapshot, startDate, endDate) : snapshot
-        return NextResponse.json({ ...data, source: 'bundled-snapshot' })
+        return json({ ...data, source: 'bundled-snapshot' })
       }
     }
 
-    const saved = await readCacheFile()
+    const saved = await readCacheFile(cacheKey)
     if (hasDateFilter && saved) {
-      return NextResponse.json(filterCachedData(saved.data, startDate, endDate))
+      return json({ ...filterCachedData(saved.data, startDate, endDate), source: 'live-cache' })
     }
 
     if (!hasDateFilter) {
-      if (cache && Date.now() - cacheAt < CACHE_TTL) return NextResponse.json(cache)
+      if (cache && Date.now() - cacheAt < CACHE_TTL) return json({ ...cache, source: 'live-cache' })
       if (saved) {
         cache = saved.data
         cacheAt = saved.cacheAt
-        return NextResponse.json(saved.data)
+        return json({ ...saved.data, source: 'live-cache' })
       }
     }
 
-    const leads = await fetchAllLeads()
-    const dates = leads.map(l => l.createdDate || l.created?.slice(0, 10)).filter(Boolean).sort()
-    const firstDate = startDate || dates[0] || '2024-01-01'
-    const { weeklySalesMap } = await fetchXlsx(firstDate, endDate)
+    try {
+      const leads = await fetchAllLeads({ startDate, endDate: hasDateFilter ? endDate : '' })
+      const dates = leads.map(l => l.createdDate || l.created?.slice(0, 10)).filter(Boolean).sort()
+      const firstDate = startDate || dates[0] || '2024-01-01'
+      const { weeklySalesMap } = includeSales ? await fetchXlsx(firstDate, endDate) : { weeklySalesMap: {} }
 
-    const accumulatedSales = {}
-    Object.values(weeklySalesMap).forEach(ws => ws.forEach(s => {
-      if (!accumulatedSales[s.creator]) accumulatedSales[s.creator] = { gmv: 0, comissao: 0 }
-      accumulatedSales[s.creator].gmv += s.gmv
-      accumulatedSales[s.creator].comissao += s.comissao
-    }))
+      const accumulatedSales = {}
+      Object.values(weeklySalesMap).forEach(ws => ws.forEach(s => {
+        if (!accumulatedSales[s.creator]) accumulatedSales[s.creator] = { gmv: 0, comissao: 0 }
+        accumulatedSales[s.creator].gmv += s.gmv
+        accumulatedSales[s.creator].comissao += s.comissao
+      }))
 
-    const enriched = leads.map(l => {
-      const sale = matchCreator(l.handle, accumulatedSales)
-      return { ...l, gmv: sale?.gmv ?? 0, comissao: sale?.comissao ?? 0 }
-    })
-    const periodLeads = enriched.filter(l => {
-      const d = l.createdDate || l.created?.slice(0, 10)
-      return d && d >= firstDate && d <= endDate
-    })
-    const leadsWithGmv = periodLeads.filter(l => l.gmv > 0)
-    const totalGmv = periodLeads.reduce((s, l) => s + l.gmv, 0)
-    const totalCom = periodLeads.reduce((s, l) => s + l.comissao, 0)
-    const indiqueEarn = totalCom * 0.10 * 0.20
-    const totalAgenciados = periodLeads.filter(l => isAgenciadoStatus(l.status)).length
-    const conversionRate = periodLeads.length ? Math.round(totalAgenciados / periodLeads.length * 100) : 0
-    const totalGeneratedCommission = periodLeads.reduce((sum, lead) => {
-      return isAgenciadoStatus(lead.status) ? sum + lead.generatedCommission : sum
-    }, 0)
-    const byStatus = periodLeads.reduce((acc, lead) => {
-      const status = lead.status || 'Sem status'
-      acc[status] = (acc[status] ?? 0) + 1
-      return acc
-    }, {})
+      const enriched = leads.map(l => {
+        const sale = includeSales ? matchCreator(l.handle, accumulatedSales) : null
+        return { ...l, gmv: sale?.gmv ?? 0, comissao: sale?.comissao ?? 0 }
+      })
+      const periodLeads = enriched.filter(l => {
+        const d = l.createdDate || l.created?.slice(0, 10)
+        return d && d >= firstDate && d <= endDate
+      })
+      const leadsWithGmv = periodLeads.filter(l => l.gmv > 0)
+      const totalGmv = periodLeads.reduce((s, l) => s + l.gmv, 0)
+      const totalCom = periodLeads.reduce((s, l) => s + l.comissao, 0)
+      const indiqueEarn = totalCom * 0.10 * 0.20
+      const totalAgenciados = periodLeads.filter(l => isAgenciadoStatus(l.status)).length
+      const conversionRate = periodLeads.length ? Math.round(totalAgenciados / periodLeads.length * 100) : 0
+      const totalGeneratedCommission = periodLeads.reduce((sum, lead) => {
+        return isAgenciadoStatus(lead.status) ? sum + lead.generatedCommission : sum
+      }, 0)
+      const byStatus = periodLeads.reduce((acc, lead) => {
+        const status = lead.status || 'Sem status'
+        acc[status] = (acc[status] ?? 0) + 1
+        return acc
+      }, {})
 
-    const byDay = {}
-    periodLeads.forEach(l => {
-      const d = l.createdDate || l.created?.slice(0, 10)
-      if (d) {
-        if (!byDay[d]) byDay[d] = { n: 0, converted: 0 }
-        byDay[d].n += 1
-        if (isConvertedStatus(l.status)) byDay[d].converted += 1
-      }
-    })
+      const byDay = {}
+      periodLeads.forEach(l => {
+        const d = l.createdDate || l.created?.slice(0, 10)
+        if (d) {
+          if (!byDay[d]) byDay[d] = { n: 0, converted: 0 }
+          byDay[d].n += 1
+          if (isConvertedStatus(l.status)) byDay[d].converted += 1
+        }
+      })
 
-    const weeklyData = Object.entries(weeklySalesMap).map(([date, ws]) => {
-      const gmv = ws.reduce((s, r) => s + r.gmv, 0)
-      const com = ws.reduce((s, r) => s + r.comissao, 0)
-      return { date, gmv, comissao: com, indiqueEarn: com * 0.10 * 0.20 }
-    }).sort((a, b) => a.date.localeCompare(b.date))
-
-    const weeklyDataByCreator = {}
-    periodLeads.forEach(lead => {
-      const h = cleanHandle(lead.handle)
-      const points = Object.entries(weeklySalesMap).map(([date, ws]) => {
-        const match = ws.find(s => s.creator === h || (h.length >= 5 && (s.creator.includes(h) || h.includes(s.creator))))
-        return { date, gmv: match?.gmv ?? 0, comissao: match?.comissao ?? 0, indiqueEarn: (match?.comissao ?? 0) * 0.10 * 0.20 }
+      const weeklyData = Object.entries(weeklySalesMap).map(([date, ws]) => {
+        const gmv = ws.reduce((s, r) => s + r.gmv, 0)
+        const com = ws.reduce((s, r) => s + r.comissao, 0)
+        return { date, gmv, comissao: com, indiqueEarn: com * 0.10 * 0.20 }
       }).sort((a, b) => a.date.localeCompare(b.date))
-      if (points.some(p => p.gmv > 0)) weeklyDataByCreator[lead.handle || h] = points
-    })
 
-    const result = {
-      summary: { total: periodLeads.length, totalAgenciados, conversionRate, totalGeneratedCommission, leadsWithGmv: leadsWithGmv.length, matchRate: periodLeads.length ? Math.round(leadsWithGmv.length / periodLeads.length * 100) : 0, totalGmv, totalCom, indiqueEarn, byStatus, updatedAt: new Date().toISOString() },
-      leads: periodLeads.sort((a, b) => b.gmv - a.gmv),
-      byDay: Object.entries(byDay).sort(([a], [b]) => a.localeCompare(b)).map(([date, values]) => ({ date, ...values })),
-      weeklyData,
-      weeklyDataByCreator,
+      const weeklyDataByCreator = {}
+      periodLeads.forEach(lead => {
+        const h = cleanHandle(lead.handle)
+        const points = Object.entries(weeklySalesMap).map(([date, ws]) => {
+          const match = ws.find(s => s.creator === h || (h.length >= 5 && (s.creator.includes(h) || h.includes(s.creator))))
+          return { date, gmv: match?.gmv ?? 0, comissao: match?.comissao ?? 0, indiqueEarn: (match?.comissao ?? 0) * 0.10 * 0.20 }
+        }).sort((a, b) => a.date.localeCompare(b.date))
+        if (points.some(p => p.gmv > 0)) weeklyDataByCreator[lead.handle || h] = points
+      })
+
+      const result = {
+        summary: { total: periodLeads.length, totalAgenciados, conversionRate, totalGeneratedCommission, leadsWithGmv: leadsWithGmv.length, matchRate: periodLeads.length ? Math.round(leadsWithGmv.length / periodLeads.length * 100) : 0, totalGmv, totalCom, indiqueEarn, byStatus, updatedAt: new Date().toISOString() },
+        leads: periodLeads.sort((a, b) => b.gmv - a.gmv),
+        byDay: Object.entries(byDay).sort(([a], [b]) => a.localeCompare(b)).map(([date, values]) => ({ date, ...values })),
+        weeklyData,
+        weeklyDataByCreator,
+      }
+      if (!hasDateFilter) {
+        cache = result
+        cacheAt = Date.now()
+      }
+      await writeCacheFile(cacheKey, result)
+      return json({ ...result, source: 'live-notion' })
+    } catch (liveError) {
+      const snapshot = await readBundledSnapshot()
+      if (snapshot) {
+        const data = hasDateFilter ? filterCachedData(snapshot, startDate, endDate) : snapshot
+        return json({ ...data, source: 'snapshot-fallback', liveError: liveError.message })
+      }
+      throw liveError
     }
-    if (!hasDateFilter) {
-      cache = result
-      cacheAt = Date.now()
-      await writeCacheFile(result)
-    }
-    return NextResponse.json(result)
   } catch (e) {
     return NextResponse.json({ error: e.message }, { status: 500 })
   }
